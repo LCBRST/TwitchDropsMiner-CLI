@@ -1,0 +1,28 @@
+# Cache files
+__pycache__
+.mypy_cache
+# Build and dist files
+/build
+/dist
+/*.exe
+/*.zip
+/*.tmp
+/Twitch Drops Miner
+# Dev files
+*.new
+/venv
+/cache
+/*.jar
+log.txt
+/dump.dat
+/lock.file
+settings.json
+/lang/English.json
+# AppImage
+/AppDir
+/appimage-builder
+/appimage-build
+/*.AppImage
+/*.AppImage.zsync
+.DS_Store
+*.app
