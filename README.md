@@ -9,7 +9,7 @@
 After startup you’ll see the prompt `tdm[idle]>`.  
 Type `help` to list all available commands.
 
-
+```
 $ python main.py
 [09:38:00] 
 [09:38:00]   TwitchDropsMiner v16.dev (CLI)
@@ -25,7 +25,7 @@ tdm[idle]> priority add "Escape from Tarkov"
 tdm[idle]> mode priority_only
 tdm[idle]> resume
 tdm[active]> status
-
+```
 
 ---
 
@@ -93,21 +93,22 @@ Set `TDM_GUI=1` to switch back to the upstream tkinter GUI at any time.
 ## Installation & Running
 
 ### Using prebuilt binaries
+1.Download bin file at release
 
-bash
+```
 chmod +x ./twitch-drops-miner-cli
 ./twitch-drops-miner-cli
-
+```
 
 ### Manual installation
 
-bash
+```
 git clone https://github.com/<your-fork>/TwitchDropsMiner-CLI.git
 cd TwitchDropsMiner-CLI
 python3 -m venv venv
 venv/bin/pip install -U pip wheel
 venv/bin/pip install -r requirements.txt
-
+```
 
 Minimal CLI dependencies:
 
@@ -121,11 +122,11 @@ truststore
 
 ## Running
 
-bash
+```
 python main.py                # interactive shell
 python main.py --no-shell     # daemon mode
 TDM_GUI=1 python main.py      # original GUI
-
+```
 
 ---
 
@@ -225,30 +226,27 @@ TDM_GUI=1 python main.py      # original GUI
 ---
 
 ## Architecture
-
-
+```
               +---------------------+        +-----------------------+
-              twitch.py engine uses gui interface
-(state machine,     +-------> tray, status,
-GQL, websockets) channels, inv
-+----------+----------+        +----------+-----------+
-
-self.gui = ...
-
-+----------v----------+        +----------v-----------+
-cli.CLIManager gui.GUIManager
-(default) XOR (TDM_GUI=1)
-
-+ interactive + tk/pystray UI
-shell
-+----------+----------+        +----------------------+
-
-+----------v----------+
-commands.py
-CommandRegistry
-
+              |  twitch.py 引擎     |  调用  |   gui 接口           |
+              | (状态机、GQL、       +------->|   (tray, status,     |
+              |  websockets)        |        |    channels, inv,    |
+              +----------+----------+        |    progress, login)  |
+                         |                   +----------+-----------+
+                         | self.gui = ...               |
+                         |                              |
+              +----------v----------+        +----------v-----------+
+              |  cli.CLIManager     |        |  gui.GUIManager      |
+              |  （默认）           |  XOR   |  (TDM_GUI=1)         |
+              |                     |        |                      |
+              |  + 交互式 shell    |        |  + tk/pystray 控件    |
+              +----------+----------+        +----------------------+
+                         |
+              +----------v----------+
+              |  commands.py        |
+              |  CommandRegistry    |
               +---------------------+
-
+```
 
 ---
 
@@ -257,19 +255,19 @@ CommandRegistry
 ### Cannot connect to Twitch
 
 
-tdm[idle]> quality 2
+`tdm[idle]> quality 2`
 
 
 ### Proxy
 
-bash
-export https_proxy=http://127.0.0.1:7890
+
+`export https_proxy=http://127.0.0.1:7890`
 
 
 or:
 
 
-tdm[idle]> proxy http://127.0.0.1:7890
+`tdm[idle]> proxy http://127.0.0.1:7890`
 
 
 ### Do NOT watch streams while mining
