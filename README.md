@@ -103,7 +103,7 @@ chmod +x ./twitch-drops-miner-cli
 ### Manual installation
 
 ```
-git clone https://github.com/<your-fork>/TwitchDropsMiner-CLI.git
+git clone https://github.com/LCBRST/TwitchDropsMiner-CLI.git
 cd TwitchDropsMiner-CLI
 python3 -m venv venv
 venv/bin/pip install -U pip wheel

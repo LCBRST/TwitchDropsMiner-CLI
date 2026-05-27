@@ -88,7 +88,7 @@ tdm[active]> status
 要求 Python 3.10+，Linux/macOS/Windows（只在 Linux 上测过）。
 
 ```bash
-git clone https://github.com/<你>/TwitchDropsMiner-CLI.git
+git clone https://github.com/LCBRST/TwitchDropsMiner-CLI.git
 cd TwitchDropsMiner-CLI
 python3 -m venv venv
 venv/bin/pip install -U pip wheel
