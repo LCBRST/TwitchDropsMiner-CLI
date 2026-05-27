@@ -209,7 +209,7 @@ TDM_GUI=1 python main.py      # original GUI
 | Command | Purpose |
 |--------|--------|
 | `level <LEVEL>` | Change log level |
-| `dump [on|off]` | Toggle GQL dump |
+| `dump [on\|off]` | Toggle GQL dump |
 
 ---
 
@@ -228,18 +228,18 @@ TDM_GUI=1 python main.py      # original GUI
 ## Architecture
 ```
               +---------------------+        +-----------------------+
-              |  twitch.py 引擎     |  调用  |   gui 接口           |
-              | (状态机、GQL、       +------->|   (tray, status,     |
-              |  websockets)        |        |    channels, inv,    |
-              +----------+----------+        |    progress, login)  |
-                         |                   +----------+-----------+
+              |  twitch.py engine   |  uses  |   gui interface       |
+              |(state machine、GQL、+------->|   (tray, status,      |
+              |  websockets)        |        |    channels, inv,     |
+              +----------+----------+        |    progress, login)   |
+                         |                   +----------+------------+
                          | self.gui = ...               |
                          |                              |
               +----------v----------+        +----------v-----------+
               |  cli.CLIManager     |        |  gui.GUIManager      |
-              |  （默认）           |  XOR   |  (TDM_GUI=1)         |
+              |  （default）        |  XOR   |  (TDM_GUI=1)         |
               |                     |        |                      |
-              |  + 交互式 shell    |        |  + tk/pystray 控件    |
+              | + interactive shell |        |  + tk/pystray UI     |
               +----------+----------+        +----------------------+
                          |
               +----------v----------+
