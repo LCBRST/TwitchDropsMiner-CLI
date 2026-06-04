@@ -30,13 +30,50 @@ import asyncio
 import logging
 from collections import abc
 from datetime import datetime
+from pathlib import Path
 from typing import Any, NoReturn, TypeVar, TYPE_CHECKING
 
 from yarl import URL
 
 from exceptions import ExitRequest
 from translate import _
-from constants import OUTPUT_FORMATTER
+from constants import OUTPUT_FORMATTER, WORKING_DIR
+
+# Use prompt_toolkit for a fullscreen TUI shell: scrollable log area,
+# command history, line-editing, tab completion, and mouse-wheel support.
+# The TUI only activates after login; before that print() writes to stdout.
+# Falls back to GNU readline if prompt_toolkit isn't available.
+try:
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.filters import Condition
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import (
+        Layout, HSplit, Window, ConditionalContainer,
+    )
+    from prompt_toolkit.layout.controls import (
+        BufferControl, FormattedTextControl,
+    )
+    from prompt_toolkit.layout.processors import BeforeInput
+    from prompt_toolkit.styles import Style as _Style
+    _HAS_PROMPT_TOOLKIT = True
+except ImportError:
+    _HAS_PROMPT_TOOLKIT = False
+    try:
+        import readline  # type: ignore[no-redef]
+        _HAS_READLINE = True
+    except ImportError:
+        try:
+            import gnureadline as readline  # type: ignore[no-redef]
+            _HAS_READLINE = True
+        except ImportError:
+            readline = None  # type: ignore[assignment]
+            _HAS_READLINE = False
+
+_HISTORY_PATH = Path(WORKING_DIR, ".cli_history")
+_HISTORY_LENGTH = 1000
 
 if TYPE_CHECKING:
     from twitch import Twitch
@@ -323,6 +360,32 @@ class _CLIOutputHandler(logging.Handler):
 
 
 # ---------------------------------------------------------------------------
+# prompt_toolkit completer
+# ---------------------------------------------------------------------------
+
+if _HAS_PROMPT_TOOLKIT:
+
+    class _CLICompleter(Completer):
+        """Tab-completion for prompt_toolkit: yields matching command names."""
+
+        def __init__(self, cli: "CLIManager") -> None:
+            self._cli = cli
+
+        def get_completions(self, document, complete_event):
+            registry = getattr(self._cli, "_registry", None)
+            if registry is None:
+                return
+            word = document.text_before_cursor.lstrip()
+            for cmd in registry.all():
+                if cmd.name.startswith(word):
+                    yield Completion(
+                        cmd.name,
+                        start_position=-len(word),
+                        display_meta=cmd.summary,
+                    )
+
+
+# ---------------------------------------------------------------------------
 # CLIManager
 # ---------------------------------------------------------------------------
 
@@ -354,7 +417,7 @@ class CLIManager:
         # Banner
         from version import __version__
         self.print("=" * 60)
-        self.print(f"  TwitchDropsMiner v{__version__} (CLI)")
+        self.print(f"  TwitchDropsMiner {__version__} (CLI)")
         self.print("=" * 60)
 
     # ----- engine surface --------------------------------------------------
@@ -443,15 +506,24 @@ class CLIManager:
         self._output_lines.append(line)
         if len(self._output_lines) > self._max_output_lines:
             del self._output_lines[: -self._max_output_lines]
-        try:
-            if self._is_tty:
-                sys.stdout.write("\r\x1b[2K" + line + "\n")
-            else:
+        # When the TUI is running, feed the log buffer so output appears in
+        # the scrollable log area.  Otherwise write to stdout directly.
+        app = getattr(self, "_app", None)
+        buf: Buffer | None = getattr(self, "_log_buffer", None)
+        if app is not None and buf is not None and app.is_running:
+            buf.text = buf.text + line + "\n"
+            if getattr(self, "_log_follow", True):
+                buf.cursor_position = len(buf.text)
+            try:
+                app.invalidate()
+            except Exception:
+                pass
+        else:
+            try:
                 sys.stdout.write(line + "\n")
-            sys.stdout.flush()
-        except Exception:
-            pass
-        self._redraw_prompt()
+                sys.stdout.flush()
+            except Exception:
+                pass
 
     def set_games(self, games: set[Game]) -> None:
         self.settings.set_games(games)
@@ -478,52 +550,248 @@ class CLIManager:
 
     # ----- interactive shell ----------------------------------------------
 
-    def _prompt_text(self) -> str:
-        return f"tdm[{self.tray.state}]> "
+    _PROMPT_STYLE = _Style.from_dict({
+        "prompt": "#00ff00 bold",
+        "state": "#00aaaa italic",
+        "separator": "#888888",
+        "status": "#666666",
+        "log": "",
+        "input": "",
+    }) if _HAS_PROMPT_TOOLKIT else None
+
+    def _prompt_html(self):
+        """Styled prompt pieces (green prefix, cyan state)."""
+        return [
+            ("class:prompt", "tdm"),
+            ("class:separator", "["),
+            ("class:state", self.tray.state),
+            ("class:separator", "]> "),
+        ]
+
+    def _status_text(self) -> str:
+        """Right-aligned drop progress for the status line."""
+        drop = self.progress.current
+        if drop is not None:
+            return (
+                f"★ {drop.name}  "
+                f"{drop.current_minutes}/{drop.required_minutes}m"
+            )
+        return ""
+
+    _log_follow: bool = True  # auto-scroll to bottom on new output
 
     def _redraw_prompt(self) -> None:
-        if self._shell_task is None or not self._is_tty:
-            return
-        try:
-            sys.stdout.write(self._prompt_text())
-            sys.stdout.flush()
-        except Exception:
-            pass
+        pass  # the TUI manages its own display
 
-    async def _shell_loop(self) -> None:
-        from commands import CommandRegistry
-        self._registry = CommandRegistry(self._twitch, self)
-        loop = asyncio.get_running_loop()
-        # Print initial prompt
-        self._redraw_prompt()
-        while not self._close_requested.is_set():
+    # ---- prompt_toolkit TUI shell ------------------------------------------
+
+    if _HAS_PROMPT_TOOLKIT:
+
+        async def _shell_loop(self) -> None:
+            from commands import CommandRegistry
+            self._registry = CommandRegistry(self._twitch, self)
+
+            # ---- buffers ---------------------------------------------------
+
+            log_buffer = Buffer(multiline=True, read_only=False)
+            input_buffer = Buffer(
+                multiline=False,
+                history=FileHistory(str(_HISTORY_PATH)),
+                completer=_CLICompleter(self),
+                complete_while_typing=False,
+            )
+
+            # Stash references.  print() won't write to log_buffer until
+            # app.is_running is True (i.e. inside run_async), so all login
+            # output still goes to stdout.
+            self._log_buffer = log_buffer
+            self._input_buffer = input_buffer
+            self._log_follow = True
+
+            # ---- key bindings ----------------------------------------------
+
+            kb = KeyBindings()
+
+            @kb.add("enter")
+            def _submit(event):
+                text = input_buffer.text
+                input_buffer.reset()
+                if text.strip():
+                    asyncio.ensure_future(self._dispatch_cmd(text))
+
+            @kb.add("c-c")
+            def _abort(event):
+                self.close()
+                event.app.exit()
+
+            @kb.add("c-d")
+            def _eof(event):
+                if not input_buffer.text:
+                    self.close()
+                    event.app.exit()
+
+            # Log view scrolling — pause auto-follow when browsing history.
+            @kb.add("pageup")
+            def _page_up(event):
+                log_buffer.cursor_up(event.app.renderer.rows - 2)
+                self._log_follow = False
+
+            @kb.add("pagedown")
+            def _page_down(event):
+                log_buffer.cursor_down(event.app.renderer.rows - 2)
+                if log_buffer.cursor_position >= len(log_buffer.text) - 1:
+                    self._log_follow = True
+
+            @kb.add("c-home")
+            def _top(event):
+                log_buffer.cursor_position = 0
+                self._log_follow = False
+
+            @kb.add("c-end")
+            def _bottom(event):
+                log_buffer.cursor_position = len(log_buffer.text)
+                self._log_follow = True
+
+            # ---- layout ----------------------------------------------------
+
+            log_window = Window(
+                content=BufferControl(
+                    buffer=log_buffer,
+                    focusable=False,
+                ),
+                wrap_lines=True,
+                always_hide_cursor=True,
+            )
+
+            input_window = Window(
+                height=1,
+                content=BufferControl(
+                    buffer=input_buffer,
+                    input_processors=[BeforeInput(self._prompt_html)],
+                ),
+            )
+
+            status_window = ConditionalContainer(
+                content=Window(
+                    height=1,
+                    content=FormattedTextControl(
+                        lambda: self._status_text()
+                    ),
+                    style="class:status",
+                    align="RIGHT",
+                ),
+                filter=Condition(lambda: self.progress.current is not None),
+            )
+
+            root = HSplit([
+                log_window,
+                status_window,
+                input_window,
+            ])
+
+            layout = Layout(root, focused_element=input_buffer)
+
+            # ---- application -----------------------------------------------
+
+            app = Application(
+                layout=layout,
+                key_bindings=kb,
+                style=self._PROMPT_STYLE,
+                full_screen=True,
+                mouse_support=True,
+            )
+            self._app = app
+
+            # Seed the log buffer with buffered pre-TUI output.
+            if self._output_lines:
+                log_buffer.text = "\n".join(self._output_lines) + "\n"
+
             try:
-                line = await loop.run_in_executor(None, self._read_line)
-            except (EOFError, KeyboardInterrupt):
-                self.print("Got EOF on stdin — closing.")
-                self.close()
-                return
-            except asyncio.CancelledError:
-                raise
-            if line is None:
-                # stdin closed
-                self.close()
-                return
-            line = line.strip()
-            if not line:
-                self._redraw_prompt()
-                continue
+                await app.run_async()
+            finally:
+                self._app = None
+                self._log_follow = True
+
+        async def _dispatch_cmd(self, line: str) -> None:
+            """Handle a command entered in the TUI input line."""
             try:
                 await self._registry.dispatch(line)
             except ExitRequest:
+                app = getattr(self, "_app", None)
+                if app is not None:
+                    app.exit()
                 self.close()
-                return
             except Exception:
                 logger.exception("error while running command")
-            self._redraw_prompt()
 
-    def _read_line(self) -> str | None:
-        try:
-            return input()
-        except EOFError:
-            return None
+    # ---- readline fallback shell ------------------------------------------
+
+    else:
+
+        async def _shell_loop(self) -> None:  # type: ignore[no-redef]
+            from commands import CommandRegistry
+            self._registry = CommandRegistry(self._twitch, self)
+
+            if _HAS_READLINE:
+                try:
+                    readline.read_history_file(str(_HISTORY_PATH))
+                except (FileNotFoundError, OSError):
+                    pass
+                readline.set_history_length(_HISTORY_LENGTH)
+                readline.parse_and_bind("tab: complete")
+                readline.set_completer(self._completer)
+
+            loop = asyncio.get_running_loop()
+            self._redraw_prompt()
+            while not self._close_requested.is_set():
+                try:
+                    raw_line = await loop.run_in_executor(None, self._read_line)
+                except (EOFError, KeyboardInterrupt):
+                    self.print("Got EOF on stdin — closing.")
+                    self.close()
+                    return
+                except asyncio.CancelledError:
+                    raise
+                if raw_line is None:
+                    self.close()
+                    return
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    self._redraw_prompt()
+                    continue
+                try:
+                    await self._registry.dispatch(raw_line)
+                except ExitRequest:
+                    if _HAS_READLINE:
+                        try:
+                            readline.write_history_file(str(_HISTORY_PATH))
+                        except OSError:
+                            pass
+                    self.close()
+                    return
+                except Exception:
+                    logger.exception("error while running command")
+                self._redraw_prompt()
+
+        def _read_line(self) -> str | None:
+            try:
+                return input()
+            except EOFError:
+                return None
+
+        def _completer(self, text: str, state: int) -> str | None:
+            """Tab-completion callback for readline: cycles through matching commands."""
+            registry = getattr(self, "_registry", None)
+            if registry is None:
+                return None
+            matches = [name for name in registry._commands if name.startswith(text.lower())]
+            seen: set[str] = set()
+            uniq: list[str] = []
+            for m in sorted(matches):
+                cmd = registry.find(m)
+                if cmd is None:
+                    continue
+                if cmd.name not in seen:
+                    seen.add(cmd.name)
+                    uniq.append(cmd.name)
+            return uniq[state] if state < len(uniq) else None

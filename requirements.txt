@@ -1,8 +1,25 @@
-aiohttp>=3.9,<4.0
-Pillow
-pystray
-PyGObject<3.51; sys_platform == "linux"  # required for better system tray support on Linux
+# TwitchDropsMiner — Python dependencies
+# ======================================
+#
+# Install   : pip install -r requirements.txt
+# CLI-only  : pip install aiohttp yarl prompt_toolkit truststore
+# GUI (full): pip install -r requirements.txt
+#
+# Python ≥ 3.10 required.
 
-# environment-dependent dependencies
-pywin32; sys_platform == "win32"
-truststore
+# ---- core (always needed) ------------------------------------------------
+
+aiohttp>=3.9,<4.0        # async HTTP client + cookie jar
+yarl>=1.9,<2.0            # URL builder/parser (imported directly)
+prompt_toolkit>=3.0,<4.0  # rich CLI shell: history, completion, mouse-safe input
+truststore>=0.9           # use system CA trust store for TLS (optional but recommended)
+
+# ---- GUI-only (omit for CLI builds) ---------------------------------------
+
+Pillow>=10.0              # drop-image caching & manipulation
+pystray>=0.19             # cross-platform system-tray icon
+
+# ---- platform-specific GUI integration ------------------------------------
+
+#PyGObject<3.51; sys_platform == "linux"     # Linux tray (GTK backend for pystray)
+#pywin32; sys_platform == "win32"            # Windows tray (Win32 backend for pystray)

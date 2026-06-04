@@ -18,6 +18,7 @@ log.txt
 /lock.file
 settings.json
 /lang/English.json
+.cli_history
 # AppImage
 /AppDir
 /appimage-builder

@@ -12,7 +12,7 @@ Type `help` to list all available commands.
 ```
 $ python main.py
 [09:38:00] 
-[09:38:00]   TwitchDropsMiner v16.dev (CLI)
+[09:38:00]   TwitchDropsMiner release-26.06.0401 (CLI)
 [09:38:00] 
 [09:38:01] [login] Logging in...
 [09:38:02] 
@@ -110,15 +110,6 @@ venv/bin/pip install -U pip wheel
 venv/bin/pip install -r requirements.txt
 ```
 
-Minimal CLI dependencies:
-
-
-aiohttp>=3.9,<4.0
-yarl
-truststore
-
-
----
 
 ## Running
 

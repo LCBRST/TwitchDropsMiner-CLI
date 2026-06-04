@@ -9,7 +9,7 @@
 ```
 $ python main.py
 [09:38:00] ============================================================
-[09:38:00]   TwitchDropsMiner v16.dev (CLI)
+[09:38:00]   TwitchDropsMiner release-26.06.0401 (CLI)
 [09:38:00] ============================================================
 [09:38:01] [login] Logging in...
 [09:38:02] ============================================================
@@ -96,14 +96,9 @@ venv/bin/pip install -r requirements.txt
 ```
 
 `requirements.txt` 里那些 GUI 依赖（`Pillow`、`pystray`、`PyGObject`）
-是给上游 GUI 构建用的，CLI 模式下用不上但仍会被装上。如果你只要 CLI，
-最小依赖就这几个：
+是给上游 GUI 构建用的，CLI 模式下用不上但仍会被装上。
 
-```
-aiohttp>=3.9,<4.0
-yarl
-truststore
-```
+
 
 ### 运行
 
