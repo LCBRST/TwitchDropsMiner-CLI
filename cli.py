@@ -100,8 +100,10 @@ class _CLITray:
         self.state = state
 
     def notify(self, text: str, title: str | None = None) -> None:
-        prefix = f"[{title}] " if title else ""
-        self._cli.print(f"{prefix}{text}")
+        if title:
+            self._cli.print(_("cli", "notify").format(title=title, text=text))
+        else:
+            self._cli.print(text)
 
     # GUI-only no-ops
     def update_title(self, drop: TimedDrop | None) -> None:
@@ -124,7 +126,7 @@ class _CLIStatus:
 
     def update(self, text: str) -> None:
         self.text = text
-        self._cli.print(f"[status] {text}")
+        self._cli.print(_("cli", "status").format(text=text))
 
     def clear(self) -> None:
         self.text = ""
@@ -158,12 +160,12 @@ class _CLIProgress:
         self.current = drop
         if drop is None:
             if prev is not None:
-                self._cli.print("[drop] cleared")
+                self._cli.print(_("cli", "drop", "cleared"))
             return
         # Avoid spamming when the same drop just gets a per-minute tick
         if prev is None or prev.id != drop.id:
             self._cli.print(
-                f"[drop] {drop.name} — {drop.current_minutes}/{drop.required_minutes}m"
+                _("cli", "drop", "active").format(name=drop.name, current=drop.current_minutes, required=drop.required_minutes)
             )
 
 
@@ -177,11 +179,11 @@ class _CLIChannels:
     def set_watching(self, channel: Channel) -> None:
         self._watching = channel
         game = channel.game.name if channel.game else "?"
-        self._cli.print(f"[watch] {channel.name} ({game})")
+        self._cli.print(_("cli", "watch", "watching").format(channel=channel.name, game=game))
 
     def clear_watching(self) -> None:
         if self._watching is not None:
-            self._cli.print(f"[watch] cleared (was {self._watching.name})")
+            self._cli.print(_("cli", "watch", "cleared").format(channel=self._watching.name))
         self._watching = None
 
     def clear(self) -> None:
@@ -254,12 +256,12 @@ class _CLIWebsockets:
         if topics is not None:
             entry.topics = topics
         if changed:
-            self._cli.print(f"[ws#{idx}] {entry.status}")
+            self._cli.print(_("cli", "ws", "status").format(idx=idx, status=entry.status))
 
     def remove(self, idx: int) -> None:
         if idx in self._entries:
             del self._entries[idx]
-            self._cli.print(f"[ws#{idx}] removed")
+            self._cli.print(_("cli", "ws", "removed").format(idx=idx))
 
     @property
     def entries(self) -> list[_WSEntry]:
@@ -307,7 +309,10 @@ class CLILoginHandler:
     def update(self, status: str, user_id: int | None) -> None:
         self._status = status
         self._user_id = user_id
-        self._cli.print(f"[login] {status}" + (f" (id={user_id})" if user_id else ""))
+        if user_id is not None:
+            self._cli.print(_("cli", "login", "status_id").format(status=status, id=user_id))
+        else:
+            self._cli.print(_("cli", "login", "status").format(status=status))
 
     @property
     def user_id(self) -> int | None:
@@ -325,12 +330,12 @@ class CLILoginHandler:
         return LoginData()
 
     async def ask_enter_code(self, page_url: URL, user_code: str) -> None:
-        self._cli.print("=" * 60)
-        self._cli.print("Twitch login required (Device Code flow)")
-        self._cli.print(f"  1. Open: {page_url}")
-        self._cli.print(f"  2. Enter the code: {user_code}")
-        self._cli.print("  3. Approve the login in your browser, then come back.")
-        self._cli.print("=" * 60)
+        self._cli.print(_("cli", "separator"))
+        self._cli.print(_("cli", "login", "header"))
+        self._cli.print(_("cli", "login", "step_open").format(url=page_url))
+        self._cli.print(_("cli", "login", "step_code").format(code=user_code))
+        self._cli.print(_("cli", "login", "step_approve"))
+        self._cli.print(_("cli", "separator"))
         # Best-effort browser open — silently ignore on headless boxes.
         try:
             import webbrowser
@@ -416,9 +421,9 @@ class CLIManager:
 
         # Banner
         from version import __version__
-        self.print("=" * 60)
-        self.print(f"  TwitchDropsMiner {__version__} (CLI)")
-        self.print("=" * 60)
+        self.print(_("cli", "separator"))
+        self.print(_("cli", "banner").format(version=__version__))
+        self.print(_("cli", "separator"))
 
     # ----- engine surface --------------------------------------------------
 
@@ -747,7 +752,7 @@ class CLIManager:
                 try:
                     raw_line = await loop.run_in_executor(None, self._read_line)
                 except (EOFError, KeyboardInterrupt):
-                    self.print("Got EOF on stdin — closing.")
+                    self.print(_("cli", "eof"))
                     self.close()
                     return
                 except asyncio.CancelledError:

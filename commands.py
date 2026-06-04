@@ -21,6 +21,7 @@ from yarl import URL
 
 from constants import State, PriorityMode
 from exceptions import ExitRequest, ReloadRequest
+from translate import _
 
 if TYPE_CHECKING:
     from twitch import Twitch
@@ -85,14 +86,14 @@ class CommandRegistry:
         try:
             tokens = shlex.split(line)
         except ValueError as exc:
-            self._cli.print(f"parse error: {exc}")
+            self._cli.print(_("cli", "commands", "parse_error").format(exc=exc))
             return
         if not tokens:
             return
         name, *args = tokens
         cmd = self.find(name.lower())
         if cmd is None:
-            self._cli.print(f"unknown command: {name} (type 'help')")
+            self._cli.print(_("cli", "commands", "unknown").format(name=name))
             return
         ctx = CommandContext(self._twitch, self._cli, args, line)
         await cmd.run(ctx)
@@ -156,7 +157,12 @@ class CommandRegistry:
                 usage="mode [priority_only|ending_soonest|low_avbl_first]",
             ),
             Command("proxy", "Show or set the HTTP proxy", _cmd_proxy, usage="proxy [<url>|clear]"),
-            Command("lang", "Show or set the language", _cmd_lang, usage="lang [code]"),
+            Command(
+                "lang",                                                                                                                                             
+                "Show or list languages, or set the current language",                                                                                              
+                _cmd_lang,                                                                                                                                          
+                usage="lang [-ls | --list] | lang <code>",                                                                                                          
+            ),                                                                                                                                                      
             Command(
                 "quality",
                 "Show or set the connection quality (0=lowest..2=highest)",
@@ -188,15 +194,15 @@ async def _cmd_help(ctx: CommandContext) -> None:
         target = ctx.args[0].lower()
         cmd = registry.find(target)
         if cmd is None:
-            ctx.cli.print(f"unknown command: {target}")
+            ctx.cli.print(_("cli", "commands", "unknown").format(name=target))
             return
-        aliases = ", ".join(cmd.aliases) or "—"
+        aliases = ", ".join(cmd.aliases) or _("cli", "commands", "aliases_none")
         ctx.cli.print(f"{cmd.name}  —  {cmd.summary}")
         if cmd.usage:
             ctx.cli.print(f"  usage:   {cmd.usage}")
         ctx.cli.print(f"  aliases: {aliases}")
         return
-    ctx.cli.print("Commands (type 'help <cmd>' for details):")
+    ctx.cli.print(_("cli", "commands", "help_header"))
     for cmd in registry.all():
         ctx.cli.print(f"  {cmd.name:<10}  {cmd.summary}")
 
@@ -209,18 +215,19 @@ async def _cmd_status(ctx: CommandContext) -> None:
     t = ctx.twitch
     cli = ctx.cli
     state_name = t._state.name if hasattr(t, "_state") else "?"
-    cli.print(f"state    : {state_name}")
-    cli.print(f"tray     : {cli.tray.state}")
-    cli.print(f"login    : {cli.login.status} (user_id={cli.login.user_id})")
+    cli.print(_("cli", "commands", "state").format(state=state_name))
+    cli.print(_("cli", "commands", "tray").format(state=cli.tray.state))
+    cli.print(_("cli", "commands", "login").format(status=cli.login.status, id=cli.login.user_id))
     watching = t.watching_channel.get_with_default(None)
-    cli.print(f"watching : {watching.name if watching else '—'}")
-    cli.print(f"campaigns: {len(t.inventory)}, wanted games: {len(t.wanted_games)}")
-    cli.print(f"channels : {len(t.channels)} known")
+    none = _("cli", "commands", "aliases_none")
+    cli.print(_("cli", "commands", "watching").format(channel=(watching.name if watching else none)))
+    cli.print(_("cli", "commands", "campaigns").format(count=len(t.inventory), wanted=len(t.wanted_games)))
+    cli.print(_("cli", "commands", "channels_count").format(count=len(t.channels)))
     if cli.websockets.entries:
         for e in cli.websockets.entries:
-            cli.print(f"  ws#{e.idx}: {e.status} ({e.topics} topics)")
+            cli.print(_("cli", "commands", "ws_entry").format(idx=e.idx, status=e.status, topics=e.topics))
     else:
-        cli.print("  ws: —")
+        cli.print(_("cli", "commands", "ws_none"))
 
 
 async def _cmd_log(ctx: CommandContext) -> None:
@@ -229,7 +236,7 @@ async def _cmd_log(ctx: CommandContext) -> None:
         try:
             n = max(1, int(ctx.args[0]))
         except ValueError:
-            ctx.cli.print(f"bad number: {ctx.args[0]}")
+            ctx.cli.print(_("cli", "commands", "bad_number").format(value=ctx.args[0]))
             return
     lines = ctx.cli.output_buffer[-n:]
     for line in lines:
@@ -244,22 +251,19 @@ async def _cmd_clear(ctx: CommandContext) -> None:
 
 async def _cmd_version(ctx: CommandContext) -> None:
     from version import __version__
-    ctx.cli.print(f"TwitchDropsMiner v{__version__} (CLI)")
+    ctx.cli.print(_("cli", "commands", "version").format(version=__version__))
 
 
 # Login ---------------------------------------------------------------------
 
 async def _cmd_login(ctx: CommandContext) -> None:
-    ctx.cli.print(
-        "To force a re-login, delete cookies.jar and restart. "
-        "Triggering a runtime re-login isn't supported by the engine."
-    )
+    ctx.cli.print(_("cli", "commands", "login_hint"))
 
 
 async def _cmd_whoami(ctx: CommandContext) -> None:
     cli = ctx.cli
-    cli.print(f"status : {cli.login.status}")
-    cli.print(f"user_id: {cli.login.user_id}")
+    cli.print(_("cli", "commands", "whoami_status").format(status=cli.login.status))
+    cli.print(_("cli", "commands", "whoami_user").format(id=cli.login.user_id))
 
 
 # Mining control ------------------------------------------------------------
@@ -267,22 +271,22 @@ async def _cmd_whoami(ctx: CommandContext) -> None:
 async def _cmd_pause(ctx: CommandContext) -> None:
     ctx.twitch.stop_watching()
     ctx.twitch.change_state(State.IDLE)
-    ctx.cli.print("paused — engine in IDLE")
+    ctx.cli.print(_("cli", "commands", "paused"))
 
 
 async def _cmd_resume(ctx: CommandContext) -> None:
     ctx.twitch.change_state(State.INVENTORY_FETCH)
-    ctx.cli.print("resumed — fetching inventory")
+    ctx.cli.print(_("cli", "commands", "resumed"))
 
 
 async def _cmd_reload(ctx: CommandContext) -> None:
-    ctx.cli.print("reloading…")
+    ctx.cli.print(_("cli", "commands", "reloading"))
     raise ReloadRequest()
 
 
 async def _cmd_watch(ctx: CommandContext) -> None:
     if not ctx.args:
-        ctx.cli.print("usage: watch <channel-login>")
+        ctx.cli.print(_("cli", "commands", "watch_usage"))
         return
     target = ctx.args[0].lower().lstrip("@")
     found = None
@@ -291,20 +295,20 @@ async def _cmd_watch(ctx: CommandContext) -> None:
             found = ch
             break
     if found is None:
-        ctx.cli.print(f"channel '{target}' is not in the known list")
-        ctx.cli.print("hint: run 'channels' or 'resume' first to populate the list")
+        ctx.cli.print(_("cli", "commands", "watch_not_found").format(channel=target))
+        ctx.cli.print(_("cli", "commands", "watch_hint"))
         return
     if not ctx.twitch.can_watch(found):
-        ctx.cli.print(f"can't watch '{found.name}' right now (offline / no drops / excluded)")
+        ctx.cli.print(_("cli", "commands", "watch_cant").format(channel=found.name))
         return
     ctx.cli.channels.request(found)
     ctx.twitch.change_state(State.CHANNEL_SWITCH)
-    ctx.cli.print(f"requested switch to {found.name}")
+    ctx.cli.print(_("cli", "commands", "watch_switching").format(channel=found.name))
 
 
 async def _cmd_unwatch(ctx: CommandContext) -> None:
     ctx.twitch.stop_watching()
-    ctx.cli.print("stopped watching")
+    ctx.cli.print(_("cli", "commands", "unwatch_stopped"))
 
 
 # Inventory -----------------------------------------------------------------
@@ -312,16 +316,16 @@ async def _cmd_unwatch(ctx: CommandContext) -> None:
 async def _cmd_inventory(ctx: CommandContext) -> None:
     inv = ctx.twitch.inventory
     if not inv:
-        ctx.cli.print("inventory is empty (try 'resume' or wait for the next refresh)")
+        ctx.cli.print(_("cli", "commands", "inv_empty"))
         return
     for camp in inv:
         flags = []
         if getattr(camp, "upcoming", False):
-            flags.append("upcoming")
+            flags.append(_("cli", "commands", "inv_flag_upcoming"))
         if not getattr(camp, "eligible", True):
-            flags.append("ineligible")
+            flags.append(_("cli", "commands", "inv_flag_ineligible"))
         if getattr(camp, "active", False):
-            flags.append("active")
+            flags.append(_("cli", "commands", "inv_flag_active"))
         flag_str = (" [" + ", ".join(flags) + "]") if flags else ""
         ctx.cli.print(f"• {camp.game.name}: {camp.name}{flag_str}")
         for drop in getattr(camp, "drops", []):
@@ -337,7 +341,7 @@ async def _cmd_inventory(ctx: CommandContext) -> None:
 async def _cmd_campaigns(ctx: CommandContext) -> None:
     inv = ctx.twitch.inventory
     if not inv:
-        ctx.cli.print("no campaigns")
+        ctx.cli.print(_("cli", "commands", "inv_no_campaigns"))
         return
     for camp in inv:
         ctx.cli.print(f"• {camp.game.name}: {camp.name}")
@@ -346,10 +350,10 @@ async def _cmd_campaigns(ctx: CommandContext) -> None:
 async def _cmd_drops(ctx: CommandContext) -> None:
     drop = ctx.cli.progress.current
     if drop is None:
-        ctx.cli.print("no active drop")
+        ctx.cli.print(_("cli", "commands", "inv_no_drop"))
         return
     ctx.cli.print(
-        f"{drop.name} — {drop.current_minutes}/{drop.required_minutes}m"
+        _("cli", "commands", "inv_drop_progress").format(name=drop.name, current=drop.current_minutes, required=drop.required_minutes)
     )
 
 
@@ -363,7 +367,7 @@ async def _cmd_claim(ctx: CommandContext) -> None:
                 ok = await drop.claim()
                 if ok:
                     claimed += 1
-    ctx.cli.print(f"claimed {claimed} drop(s)")
+    ctx.cli.print(_("cli", "commands", "claimed").format(count=claimed))
 
 
 # Channels ------------------------------------------------------------------
@@ -372,14 +376,14 @@ async def _cmd_channels(ctx: CommandContext) -> None:
     show_all = "--all" in ctx.args
     chans = list(ctx.twitch.channels.values())
     if not chans:
-        ctx.cli.print("no channels")
+        ctx.cli.print(_("cli", "commands", "no_channels"))
         return
     chans.sort(key=lambda c: (c.offline, c.name.lower()))
     for ch in chans:
         if not show_all and ch.offline:
             continue
         game = ch.game.name if ch.game else "—"
-        flags = "online" if not ch.offline else "offline"
+        flags = _("cli", "commands", "ch_online") if not ch.offline else _("cli", "commands", "ch_offline")
         viewers = getattr(ch, "viewers", None)
         v = f", {viewers} viewers" if viewers is not None and not ch.offline else ""
         ctx.cli.print(f"  {ch.name:<25} {flags:<8} {game}{v}")
@@ -389,7 +393,7 @@ async def _cmd_online(ctx: CommandContext) -> None:
     ctx.args.append("--online-only")
     chans = [c for c in ctx.twitch.channels.values() if not c.offline]
     if not chans:
-        ctx.cli.print("no online channels")
+        ctx.cli.print(_("cli", "commands", "channels_none_online"))
         return
     for ch in sorted(chans, key=lambda c: c.name.lower()):
         game = ch.game.name if ch.game else "—"
@@ -410,63 +414,63 @@ async def _cmd_priority(ctx: CommandContext) -> None:
     pri: list[str] = list(s.priority)
     if sub == "list":
         if not pri:
-            ctx.cli.print("priority list is empty")
+            ctx.cli.print(_("cli", "commands", "pri_empty"))
             return
         for i, name in enumerate(pri):
             ctx.cli.print(f"  {i}: {name}")
         return
     if sub == "add":
         if len(ctx.args) < 2:
-            ctx.cli.print("usage: priority add <game>")
+            ctx.cli.print(_("cli", "commands", "pri_usage_add"))
             return
         name = " ".join(ctx.args[1:])
         if name in pri:
-            ctx.cli.print(f"already in list: {name}")
+            ctx.cli.print(_("cli", "commands", "pri_already").format(name=name))
             return
         pri.append(name)
         s.priority = pri
         s.save()
-        ctx.cli.print(f"added: {name}")
+        ctx.cli.print(_("cli", "commands", "pri_added").format(name=name))
         return
     if sub == "remove":
         if len(ctx.args) < 2:
-            ctx.cli.print("usage: priority remove <game>")
+            ctx.cli.print(_("cli", "commands", "pri_usage_remove"))
             return
         name = " ".join(ctx.args[1:])
         if name not in pri:
-            ctx.cli.print(f"not in list: {name}")
+            ctx.cli.print(_("cli", "commands", "pri_not_found").format(name=name))
             return
         pri.remove(name)
         s.priority = pri
         s.save()
-        ctx.cli.print(f"removed: {name}")
+        ctx.cli.print(_("cli", "commands", "pri_removed").format(name=name))
         return
     if sub == "move":
         if len(ctx.args) < 3:
-            ctx.cli.print("usage: priority move <game> <delta>")
+            ctx.cli.print(_("cli", "commands", "pri_usage_move"))
             return
         name = ctx.args[1]
         try:
             delta = int(ctx.args[2])
         except ValueError:
-            ctx.cli.print("delta must be integer")
+            ctx.cli.print(_("cli", "commands", "pri_delta_bad"))
             return
         if name not in pri:
-            ctx.cli.print(f"not in list: {name}")
+            ctx.cli.print(_("cli", "commands", "pri_not_found").format(name=name))
             return
         idx = pri.index(name)
         new_idx = max(0, min(len(pri) - 1, idx + delta))
         pri.insert(new_idx, pri.pop(idx))
         s.priority = pri
         s.save()
-        ctx.cli.print(f"moved {name}: {idx} -> {new_idx}")
+        ctx.cli.print(_("cli", "commands", "pri_moved").format(name=name, old=idx, new=new_idx))
         return
     if sub == "clear":
         s.priority = []
         s.save()
-        ctx.cli.print("priority list cleared")
+        ctx.cli.print(_("cli", "commands", "pri_cleared"))
         return
-    ctx.cli.print(f"unknown subcommand: {sub}")
+    ctx.cli.print(_("cli", "commands", "pri_unknown").format(sub=sub))
 
 
 async def _cmd_exclude(ctx: CommandContext) -> None:
@@ -477,37 +481,37 @@ async def _cmd_exclude(ctx: CommandContext) -> None:
     excl: set[str] = set(s.exclude)
     if sub == "list":
         if not excl:
-            ctx.cli.print("exclude list is empty")
+            ctx.cli.print(_("cli", "commands", "exc_empty"))
             return
         for name in sorted(excl):
             ctx.cli.print(f"  {name}")
         return
     if sub == "add":
         if len(ctx.args) < 2:
-            ctx.cli.print("usage: exclude add <game>")
+            ctx.cli.print(_("cli", "commands", "exc_usage_add"))
             return
         name = " ".join(ctx.args[1:])
         excl.add(name)
         s.exclude = excl
         s.save()
-        ctx.cli.print(f"excluded: {name}")
+        ctx.cli.print(_("cli", "commands", "exc_excluded").format(name=name))
         return
     if sub == "remove":
         if len(ctx.args) < 2:
-            ctx.cli.print("usage: exclude remove <game>")
+            ctx.cli.print(_("cli", "commands", "exc_usage_remove"))
             return
         name = " ".join(ctx.args[1:])
         excl.discard(name)
         s.exclude = excl
         s.save()
-        ctx.cli.print(f"un-excluded: {name}")
+        ctx.cli.print(_("cli", "commands", "exc_unexcluded").format(name=name))
         return
     if sub == "clear":
         s.exclude = set()
         s.save()
-        ctx.cli.print("exclude list cleared")
+        ctx.cli.print(_("cli", "commands", "exc_cleared"))
         return
-    ctx.cli.print(f"unknown subcommand: {sub}")
+    ctx.cli.print(_("cli", "commands", "exc_unknown").format(sub=sub))
 
 
 _MODE_NAMES = {
@@ -526,56 +530,66 @@ async def _cmd_mode(ctx: CommandContext) -> None:
         return
     name = ctx.args[0].lower()
     if name not in _MODE_NAMES:
-        ctx.cli.print(f"unknown mode: {name}")
-        ctx.cli.print(f"valid: {', '.join(_MODE_NAMES)}")
+        ctx.cli.print(_("cli", "commands", "mode_unknown").format(name=name))
+        ctx.cli.print(_("cli", "commands", "mode_valid").format(modes=", ".join(_MODE_NAMES)))
         return
     s.priority_mode = _MODE_NAMES[name]
     s.save()
-    ctx.cli.print(f"mode set to {name}")
+    ctx.cli.print(_("cli", "commands", "mode_set").format(name=name))
 
 
 async def _cmd_proxy(ctx: CommandContext) -> None:
     s = _settings(ctx)
     if not ctx.args:
-        ctx.cli.print(f"proxy: {s.proxy or '—'}")
+        none = _("cli", "commands", "aliases_none")
+        ctx.cli.print(_("cli", "commands", "proxy_current").format(url=(s.proxy or none)))
         return
     val = ctx.args[0]
     if val.lower() == "clear":
         s.proxy = URL()
         s.save()
-        ctx.cli.print("proxy cleared")
+        ctx.cli.print(_("cli", "commands", "proxy_cleared"))
         return
     s.proxy = URL(val)
     s.save()
-    ctx.cli.print(f"proxy set to {s.proxy}")
+    ctx.cli.print(_("cli", "commands", "proxy_set").format(url=s.proxy))
 
 
 async def _cmd_lang(ctx: CommandContext) -> None:
     s = _settings(ctx)
     if not ctx.args:
-        ctx.cli.print(f"lang: {s.language}")
+        ctx.cli.print(_("cli", "commands", "lang_current").format(lang=s.language))
+        return
+    if ctx.args[0] in ("-ls", "--list"):                                                                                                                            
+        ctx.cli.print(_("cli", "commands", "lang_list_header"))                                                                                                     
+        for code in _.languages:                                                                                                                                    
+            display = _.language_display(code)                                                                                                                      
+            mark = " *" if code == s.language else ""                                                                                                               
+            ctx.cli.print(                                                                                                                                          
+                _("cli", "commands", "lang_list_entry").format(code=code, display=display, mark=mark)                                                               
+            )                                                                                                                                                       
         return
     s.language = ctx.args[0]
     s.save()
-    ctx.cli.print(f"lang set to {s.language} (effective on next start)")
+    ctx.cli.print(_("cli", "commands", "lang_set").format(lang=s.language))
 
 
 async def _cmd_quality(ctx: CommandContext) -> None:
     s = _settings(ctx)
     if not ctx.args:
-        ctx.cli.print(f"quality: {s.connection_quality}")
+        ctx.cli.print(_("cli", "commands", "quality_current").format(q=s.connection_quality))
         return
     try:
         q = int(ctx.args[0])
     except ValueError:
-        ctx.cli.print("quality must be an integer 0..2")
+        ctx.cli.print(_("cli", "commands", "quality_must_be_int"))
         return
     if not 0 <= q <= 2:
-        ctx.cli.print("quality must be 0..2")
+        ctx.cli.print(_("cli", "commands", "quality_range"))
         return
     s.connection_quality = q
     s.save()
-    ctx.cli.print(f"quality set to {q}")
+    ctx.cli.print(_("cli", "commands", "quality_set").format(q=q))
 
 
 _GETTABLE_KEYS = (
@@ -587,29 +601,29 @@ _GETTABLE_KEYS = (
 
 async def _cmd_get(ctx: CommandContext) -> None:
     if not ctx.args:
-        ctx.cli.print("known keys:")
+        ctx.cli.print(_("cli", "commands", "get_known_keys"))
         for k in _GETTABLE_KEYS:
             ctx.cli.print(f"  {k}")
         return
     key = ctx.args[0]
     s = _settings(ctx)
     if key not in s._settings:
-        ctx.cli.print(f"unknown key: {key}")
+        ctx.cli.print(_("cli", "commands", "get_unknown_key").format(key=key))
         return
     val = getattr(s, key)
     if isinstance(val, PriorityMode):
         val = val.name.lower()
-    ctx.cli.print(f"{key} = {val}")
+    ctx.cli.print(_("cli", "commands", "get_value").format(key=key, value=val))
 
 
 async def _cmd_set(ctx: CommandContext) -> None:
     if len(ctx.args) < 2:
-        ctx.cli.print("usage: set <key> <value>")
+        ctx.cli.print(_("cli", "commands", "set_usage"))
         return
     key, raw = ctx.args[0], " ".join(ctx.args[1:])
     s = _settings(ctx)
     if key not in s._settings:
-        ctx.cli.print(f"unknown key: {key}")
+        ctx.cli.print(_("cli", "commands", "set_unknown_key").format(key=key))
         return
     cur = getattr(s, key)
     try:
@@ -625,22 +639,22 @@ async def _cmd_set(ctx: CommandContext) -> None:
             v = [part for part in raw.split(",") if part]
         elif isinstance(cur, PriorityMode):
             if raw not in _MODE_NAMES:
-                ctx.cli.print(f"valid modes: {', '.join(_MODE_NAMES)}")
+                ctx.cli.print(_("cli", "commands", "mode_valid").format(modes=", ".join(_MODE_NAMES)))
                 return
             v = _MODE_NAMES[raw]
         else:
             v = raw
     except Exception as exc:
-        ctx.cli.print(f"can't parse value: {exc}")
+        ctx.cli.print(_("cli", "commands", "set_cant_parse").format(exc=exc))
         return
     setattr(s, key, v)
     s.save()
-    ctx.cli.print(f"{key} = {getattr(s, key)}")
+    ctx.cli.print(_("cli", "commands", "set_value").format(key=key, value=getattr(s, key)))
 
 
 async def _cmd_save(ctx: CommandContext) -> None:
     ctx.twitch.save(force=True)
-    ctx.cli.print("saved")
+    ctx.cli.print(_("cli", "commands", "saved"))
 
 
 # Debug ---------------------------------------------------------------------
@@ -657,14 +671,14 @@ _LEVEL_BY_NAME = {
 async def _cmd_level(ctx: CommandContext) -> None:
     log = logging.getLogger("TwitchDrops")
     if not ctx.args:
-        ctx.cli.print(f"level: {logging.getLevelName(log.getEffectiveLevel())}")
+        ctx.cli.print(_("cli", "commands", "level_current").format(level=logging.getLevelName(log.getEffectiveLevel())))
         return
     name = ctx.args[0].upper()
     if name not in _LEVEL_BY_NAME:
-        ctx.cli.print(f"valid: {', '.join(_LEVEL_BY_NAME)}")
+        ctx.cli.print(_("cli", "commands", "level_valid").format(levels=", ".join(_LEVEL_BY_NAME)))
         return
     log.setLevel(_LEVEL_BY_NAME[name])
-    ctx.cli.print(f"level set to {name}")
+    ctx.cli.print(_("cli", "commands", "level_set").format(level=name))
 
 
 async def _cmd_dump(ctx: CommandContext) -> None:
@@ -672,4 +686,4 @@ async def _cmd_dump(ctx: CommandContext) -> None:
     cur = getattr(s._args, "dump", False)
     new = not cur if not ctx.args else ctx.args[0].lower() in ("1", "true", "on", "yes")
     s._args.dump = new
-    ctx.cli.print(f"dump {'enabled' if new else 'disabled'}")
+    ctx.cli.print(_("cli", "commands", "dump_enabled") if new else _("cli", "commands", "dump_disabled"))

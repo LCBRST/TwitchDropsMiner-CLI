@@ -1,0 +1,283 @@
+{
+    "english_name": "English",
+    "cli": {
+        "banner": "TwitchDropsMiner {version} (CLI)",
+        "separator": "============================================================",
+        "eof": "Got EOF on stdin \u2014 closing.",
+        "status": "[status] {text}",
+        "notify": "[{title}] {text}",
+        "drop": {
+            "cleared": "[drop] cleared",
+            "active": "[drop] {name} \u2014 {current}/{required}m"
+        },
+        "watch": {
+            "watching": "[watch] {channel} ({game})",
+            "cleared": "[watch] cleared (was {channel})"
+        },
+        "ws": {
+            "status": "[ws#{idx}] {status}",
+            "removed": "[ws#{idx}] removed"
+        },
+        "login": {
+            "status": "[login] {status}",
+            "status_id": "[login] {status} (id={id})",
+            "header": "Twitch login required (Device Code flow)",
+            "step_open": "  1. Open: {url}",
+            "step_code": "  2. Enter the code: {code}",
+            "step_approve": "  3. Approve the login in your browser, then come back."
+        },
+        "commands": {
+            "help_header": "Commands (type 'help <cmd>' for details):",
+            "unknown": "unknown command: {name} (type 'help')",
+            "parse_error": "parse error: {exc}",
+            "aliases_none": "\u2014",
+            "state": "state    : {state}",
+            "tray": "tray     : {state}",
+            "login": "login    : {status} (user_id={id})",
+            "watching": "watching : {channel}",
+            "campaigns": "campaigns: {count}, wanted games: {wanted}",
+            "channels_count": "channels : {count} known",
+            "ws_entry": "  ws#{idx}: {status} ({topics} topics)",
+            "ws_none": "  ws: \u2014",
+            "bad_number": "bad number: {value}",
+            "version": "TwitchDropsMiner v{version} (CLI)",
+            "paused": "paused \u2014 engine in IDLE",
+            "resumed": "resumed \u2014 fetching inventory",
+            "reloading": "reloading\u2026",
+            "watch_usage": "usage: watch <channel-login>",
+            "watch_not_found": "channel '{channel}' is not in the known list",
+            "watch_hint": "hint: run 'channels' or 'resume' first to populate the list",
+            "watch_cant": "can't watch '{channel}' right now (offline / no drops / excluded)",
+            "watch_switching": "requested switch to {channel}",
+            "unwatch_stopped": "stopped watching",
+            "login_hint": "To force a re-login, delete cookies.jar and restart. Triggering a runtime re-login isn't supported by the engine.",
+            "whoami_status": "status : {status}",
+            "whoami_user": "user_id: {id}",
+            "inv_empty": "inventory is empty (try 'resume' or wait for the next refresh)",
+            "inv_no_campaigns": "no campaigns",
+            "inv_no_drop": "no active drop",
+            "inv_drop_progress": "{name} \u2014 {current}/{required}m",
+            "inv_flag_upcoming": "upcoming",
+            "inv_flag_ineligible": "ineligible",
+            "inv_flag_active": "active",
+            "claimed": "claimed {count} drop(s)",
+            "no_channels": "no channels",
+            "channels_none_online": "no online channels",
+            "ch_online": "online",
+            "ch_offline": "offline",
+            "saved": "saved",
+            "pri_empty": "priority list is empty",
+            "pri_already": "already in list: {name}",
+            "pri_added": "added: {name}",
+            "pri_not_found": "not in list: {name}",
+            "pri_removed": "removed: {name}",
+            "pri_usage_add": "usage: priority add <game>",
+            "pri_usage_remove": "usage: priority remove <game>",
+            "pri_usage_move": "usage: priority move <game> <delta>",
+            "pri_moved": "moved {name}: {old} -> {new}",
+            "pri_delta_bad": "delta must be integer",
+            "pri_cleared": "priority list cleared",
+            "pri_unknown": "unknown subcommand: {sub}",
+            "exc_empty": "exclude list is empty",
+            "exc_excluded": "excluded: {name}",
+            "exc_unexcluded": "un-excluded: {name}",
+            "exc_cleared": "exclude list cleared",
+            "exc_unknown": "unknown subcommand: {sub}",
+            "exc_usage_add": "usage: exclude add <game>",
+            "exc_usage_remove": "usage: exclude remove <game>",
+            "mode_current": "{mode}",
+            "mode_unknown": "unknown mode: {name}",
+            "mode_valid": "valid: {modes}",
+            "mode_set": "mode set to {name}",
+            "proxy_current": "proxy: {url}",
+            "proxy_cleared": "proxy cleared",
+            "proxy_set": "proxy set to {url}",
+            "lang_current": "lang: {lang}",
+            "lang_set": "lang set to {lang} (effective on next start)",
+            "quality_current": "quality: {q}",
+            "quality_must_be_int": "quality must be an integer 0..2",
+            "quality_range": "quality must be 0..2",
+            "quality_set": "quality set to {q}",
+            "get_known_keys": "known keys:",
+            "get_unknown_key": "unknown key: {key}",
+            "get_value": "{key} = {value}",
+            "set_usage": "usage: set <key> <value>",
+            "set_unknown_key": "unknown key: {key}",
+            "set_cant_parse": "can't parse value: {exc}",
+            "set_value": "{key} = {value}",
+            "level_current": "level: {level}",
+            "level_valid": "valid: {levels}",
+            "level_set": "level set to {level}",
+            "dump_enabled": "dump enabled",
+            "dump_disabled": "dump disabled"
+        }
+    },
+    "status": {
+        "terminated": "\nApplication Terminated.\nClose the window to exit the application.",
+        "watching": "Watching: {channel}",
+        "goes_online": "{channel} goes ONLINE, switching...",
+        "goes_offline": "{channel} goes OFFLINE, switching...",
+        "claimed_drop": "Claimed drop: {drop}",
+        "no_channel": "No available channels to watch. Waiting for an ONLINE channel...",
+        "no_campaign": "No active campaigns to mine drops for. Waiting for an active campaign..."
+    },
+    "login": {
+        "unexpected_content": "Unexpected content type returned, usually due to being redirected. Do you need to login for internet access?",
+        "chrome": {
+            "startup": "Opening Chrome...",
+            "login_to_complete": "Complete the login procedure manually by pressing the Login button again.",
+            "no_token": "No authorization token could be found.",
+            "closed_window": "The Chrome window was closed before the login procedure could be completed."
+        },
+        "error_code": "Login error code: {error_code}",
+        "incorrect_login_pass": "Incorrect username or password.",
+        "incorrect_email_code": "Incorrect email code.",
+        "incorrect_twofa_code": "Incorrect 2FA code.",
+        "email_code_required": "Email code required. Check your email.",
+        "twofa_code_required": "2FA token required."
+    },
+    "error": {
+        "captcha": "Your login attempt was denied by CAPTCHA.\nPlease try again in 12+ hours.",
+        "site_down": "Twitch is down, retrying in {seconds} seconds...",
+        "no_connection": "Cannot connect to Twitch, retrying in {seconds} seconds... ({url})"
+    },
+    "gui": {
+        "output": "Output",
+        "status": {
+            "name": "Status",
+            "idle": "Idle",
+            "exiting": "Exiting...",
+            "terminated": "Terminated",
+            "cleanup": "Cleaning up channels...",
+            "gathering": "Gathering channels...",
+            "switching": "Switching the channel...",
+            "fetching_inventory": "Fetching inventory...",
+            "fetching_campaigns": "Fetching campaigns...",
+            "adding_campaigns": "Adding campaigns to inventory... {counter}"
+        },
+        "tabs": {
+            "main": "Main",
+            "inventory": "Inventory",
+            "settings": "Settings",
+            "help": "Help"
+        },
+        "tray": {
+            "notification_title": "Mined Drop",
+            "minimize": "Minimize to Tray",
+            "show": "Show",
+            "quit": "Quit"
+        },
+        "login": {
+            "name": "Login Form",
+            "labels": "Status:\nUser ID:",
+            "logged_in": "Logged in",
+            "logged_out": "Logged out",
+            "logging_in": "Logging in...",
+            "required": "Login required",
+            "request": "Please log in to continue.",
+            "username": "Username",
+            "password": "Password",
+            "twofa_code": "2FA code (optional)",
+            "button": "Login"
+        },
+        "websocket": {
+            "name": "Websocket Status",
+            "websocket": "Websocket #{id}:",
+            "initializing": "Initializing...",
+            "connected": "Connected",
+            "disconnected": "Disconnected",
+            "connecting": "Connecting...",
+            "disconnecting": "Disconnecting...",
+            "reconnecting": "Reconnecting..."
+        },
+        "progress": {
+            "name": "Campaign Progress",
+            "drop": "Drop:",
+            "game": "Game:",
+            "campaign": "Campaign:",
+            "remaining": "{time} remaining",
+            "drop_progress": "Progress:",
+            "campaign_progress": "Progress:"
+        },
+        "channels": {
+            "name": "Channels",
+            "switch": "Switch",
+            "online": "ONLINE  \u2714",
+            "pending": "OFFLINE \u23f3",
+            "offline": "OFFLINE \u274c",
+            "headings": {
+                "channel": "Channel",
+                "status": "Status",
+                "game": "Game",
+                "viewers": "Viewers"
+            }
+        },
+        "inventory": {
+            "filter": {
+                "name": "Filter",
+                "show": "Show:",
+                "not_linked": "Not linked",
+                "upcoming": "Upcoming",
+                "expired": "Expired",
+                "excluded": "Excluded",
+                "finished": "Finished",
+                "refresh": "Refresh"
+            },
+            "status": {
+                "linked": "Linked \u2714",
+                "not_linked": "Not Linked \u274c",
+                "active": "Active \u2714",
+                "upcoming": "Upcoming \u23f3",
+                "expired": "Expired \u274c",
+                "claimed": "Claimed \u2714",
+                "ready_to_claim": "Ready to claim \u23f3"
+            },
+            "starts": "Starts: {time}",
+            "ends": "Ends: {time}",
+            "allowed_channels": "Allowed Channels:",
+            "all_channels": "All",
+            "and_more": "and {amount} more...",
+            "percent_progress": "{percent} of {minutes} minutes",
+            "minutes_progress": "{minutes} minutes"
+        },
+        "settings": {
+            "general": {
+                "name": "General",
+                "autostart": "Autostart: ",
+                "tray": "Autostart into tray: ",
+                "tray_notifications": "Tray notifications: ",
+                "dark_mode": "Dark mode: ",
+                "priority_mode": "Priority mode: ",
+                "proxy": "Proxy (requires restart):"
+            },
+            "advanced": {
+                "name": "Advanced",
+                "warning": "Warning!",
+                "warning_text": "These options will cause the miner to misbehave.\nIf you're experiencing any issues, make sure all of these options are disabled.",
+                "enable_badges_emotes": "Enable partial support for badges and emotes: ",
+                "available_drops_check": "Enable extra available drops check: "
+            },
+            "priority_modes": {
+                "priority_only": "Priority list only",
+                "ending_soonest": "Ending soonest",
+                "low_availability": "Low availability first"
+            },
+            "game_name": "Game name",
+            "priority": "Priority",
+            "exclude": "Exclude",
+            "reload": "Reload",
+            "reload_text": "Most changes require a reload to take an immediate effect: "
+        },
+        "help": {
+            "links": {
+                "name": "Useful Links",
+                "inventory": "See Twitch inventory",
+                "campaigns": "See all campaigns and manage account links"
+            },
+            "how_it_works": "How It Works",
+            "how_it_works_text": "Every several seconds, the application pretends to watch a particular stream by fetching stream metadata - this is enough to advance the drops. Note that this completely bypasses the need to download any actual stream of video and sound. To keep the status (ONLINE or OFFLINE) of the channels up-to-date, there's a websocket connection established that receives events about streams going up or down, or updates regarding the current number of viewers.",
+            "getting_started": "Getting Started",
+            "getting_started_text": "1. Login to the application.\n2. Ensure your Twitch account is linked to all campaigns you're interested in mining.\n3. If you're interested in mining everything possible, change the Priority Mode to anything other than \"Priority list only\" and press on \"Reload\".\n4. If you want to mine specific games first, use the \"Priority\" list to set up an ordered list of games of your choice. Games from the top of the list will be attempted to be mined first, before the ones lower down the list.\n5. Keep the \"Priority mode\" selected as \"Priority list only\", to avoid mining games that are not on the priority list. Or not - it's up to you.\n6. Use the \"Exclude\" list to tell the application which games should never be mined.\n7. Changing the contents of either of the lists, or changing the \"Priority mode\", requires you to press on \"Reload\" for the changes to take an effect."
+        }
+    }
+}

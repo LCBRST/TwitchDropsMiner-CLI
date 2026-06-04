@@ -219,6 +219,43 @@ class GUIMessages(TypedDict):
     help: GUIHelp
 
 
+class CLILoginMessages(TypedDict):
+    status: str
+    status_id: str
+    header: str
+    step_open: str
+    step_code: str
+    step_approve: str
+
+
+class CLIDropMessages(TypedDict):
+    cleared: str
+    active: str
+
+
+class CLIWatchMessages(TypedDict):
+    watching: str
+    cleared: str
+
+
+class CLIWSMessages(TypedDict):
+    status: str
+    removed: str
+
+
+class CLIMessages(TypedDict):
+    banner: str
+    separator: str
+    eof: str
+    status: str
+    notify: str
+    drop: CLIDropMessages
+    watch: CLIWatchMessages
+    ws: CLIWSMessages
+    login: CLILoginMessages
+    commands: dict[str, str]
+
+
 class Translation(TypedDict):
     language_name: NotRequired[str]
     english_name: str
@@ -226,10 +263,130 @@ class Translation(TypedDict):
     login: LoginMessages
     error: ErrorMessages
     gui: GUIMessages
+    cli: NotRequired[CLIMessages]
 
+
+default_cli_translation: CLIMessages = {
+    "banner": "TwitchDropsMiner {version} (CLI)",
+    "separator": "=" * 60,
+    "eof": "Got EOF on stdin — closing.",
+    "status": "[status] {text}",
+    "notify": "[{title}] {text}",
+    "drop": {
+        "cleared": "[drop] cleared",
+        "active": "[drop] {name} — {current}/{required}m",
+    },
+    "watch": {
+        "watching": "[watch] {channel} ({game})",
+        "cleared": "[watch] cleared (was {channel})",
+    },
+    "ws": {
+        "status": "[ws#{idx}] {status}",
+        "removed": "[ws#{idx}] removed",
+    },
+    "login": {
+        "status": "[login] {status}",
+        "status_id": "[login] {status} (id={id})",
+        "header": "Twitch login required (Device Code flow)",
+        "step_open": "  1. Open: {url}",
+        "step_code": "  2. Enter the code: {code}",
+        "step_approve": "  3. Approve the login in your browser, then come back.",
+    },
+    "commands": {
+        "help_header": "Commands (type 'help <cmd>' for details):",
+        "unknown": "unknown command: {name} (type 'help')",
+        "parse_error": "parse error: {exc}",
+        "aliases_none": "—",
+        "state": "state    : {state}",
+        "tray": "tray     : {state}",
+        "login": "login    : {status} (user_id={id})",
+        "watching": "watching : {channel}",
+        "campaigns": "campaigns: {count}, wanted games: {wanted}",
+        "channels_count": "channels : {count} known",
+        "ws_entry": "  ws#{idx}: {status} ({topics} topics)",
+        "ws_none": "  ws: —",
+        "bad_number": "bad number: {value}",
+        "version": "TwitchDropsMiner {version} (CLI)",
+        "paused": "paused — engine in IDLE",
+        "resumed": "resumed — fetching inventory",
+        "reloading": "reloading…",
+        "watch_usage": "usage: watch <channel-login>",
+        "watch_not_found": "channel '{channel}' is not in the known list",
+        "watch_hint": "hint: run 'channels' or 'resume' first to populate the list",
+        "watch_cant": "can't watch '{channel}' right now (offline / no drops / excluded)",
+        "watch_switching": "requested switch to {channel}",
+        "unwatch_stopped": "stopped watching",
+        "login_hint": (
+            "To force a re-login, delete cookies.jar and restart. "
+            "Triggering a runtime re-login isn't supported by the engine."
+        ),
+        "whoami_status": "status : {status}",
+        "whoami_user": "user_id: {id}",
+        "inv_empty": "inventory is empty (try 'resume' or wait for the next refresh)",
+        "inv_no_campaigns": "no campaigns",
+        "inv_no_drop": "no active drop",
+        "inv_drop_progress": "{name} — {current}/{required}m",
+        "inv_flag_upcoming": "upcoming",
+        "inv_flag_ineligible": "ineligible",
+        "inv_flag_active": "active",
+        "claimed": "claimed {count} drop(s)",
+        "no_channels": "no channels",
+        "channels_none_online": "no online channels",
+        "ch_online": "online",
+        "ch_offline": "offline",
+        "saved": "saved",
+        "pri_empty": "priority list is empty",
+        "pri_already": "already in list: {name}",
+        "pri_added": "added: {name}",
+        "pri_not_found": "not in list: {name}",
+        "pri_removed": "removed: {name}",
+        "pri_usage_add": "usage: priority add <game>",
+        "pri_usage_remove": "usage: priority remove <game>",
+        "pri_usage_move": "usage: priority move <game> <delta>",
+        "pri_moved": "moved {name}: {old} -> {new}",
+        "pri_delta_bad": "delta must be integer",
+        "pri_cleared": "priority list cleared",
+        "pri_unknown": "unknown subcommand: {sub}",
+        "exc_empty": "exclude list is empty",
+        "exc_excluded": "excluded: {name}",
+        "exc_unexcluded": "un-excluded: {name}",
+        "exc_cleared": "exclude list cleared",
+        "exc_unknown": "unknown subcommand: {sub}",
+        "exc_usage_add": "usage: exclude add <game>",
+        "exc_usage_remove": "usage: exclude remove <game>",
+        "mode_current": "{mode}",
+        "mode_unknown": "unknown mode: {name}",
+        "mode_valid": "valid: {modes}",
+        "mode_set": "mode set to {name}",
+        "proxy_current": "proxy: {url}",
+        "proxy_cleared": "proxy cleared",
+        "proxy_set": "proxy set to {url}",
+        "lang_current": "lang: {lang}",
+        "lang_set": "lang set to {lang} (effective on next start)",
+        "lang_list_header": "Available languages (* = current):",                                                                                                   
+        "lang_list_entry": "  {code:<6} {display}{mark}",
+        "quality_current": "quality: {q}",
+        "quality_must_be_int": "quality must be an integer 0..2",
+        "quality_range": "quality must be 0..2",
+        "quality_set": "quality set to {q}",
+        "get_known_keys": "known keys:",
+        "get_unknown_key": "unknown key: {key}",
+        "get_value": "{key} = {value}",
+        "set_usage": "usage: set <key> <value>",
+        "set_unknown_key": "unknown key: {key}",
+        "set_cant_parse": "can't parse value: {exc}",
+        "set_value": "{key} = {value}",
+        "level_current": "level: {level}",
+        "level_valid": "valid: {levels}",
+        "level_set": "level set to {level}",
+        "dump_enabled": "dump enabled",
+        "dump_disabled": "dump disabled",
+    },
+}
 
 default_translation: Translation = {
     "english_name": "English",
+    "cli": default_cli_translation,
     "status": {
         "terminated": "\nApplication Terminated.\nClose the window to exit the application.",
         "watching": "Watching: {channel}",
@@ -439,6 +596,33 @@ default_translation: Translation = {
 }
 
 
+# Backward compatible aliases: old full language names → ISO 639-1 codes
+_LANG_ALIASES: dict[str, str] = {
+    "English": "en", "Čeština": "cs", "Czech": "cs",
+    "Dansk": "da", "Danish": "da",
+    "Deutsch": "de", "German": "de",
+    "Español": "es", "Spanish": "es",
+    "Français": "fr", "French": "fr",
+    "Indonesian": "id",
+    "Italiano": "it", "Italian": "it",
+    "Nederlandse": "nl", "Dutch": "nl",
+    "Norsk": "no", "Norwegian": "no",
+    "Polski": "pl", "Polish": "pl",
+    "Português": "pt", "Portuguese": "pt",
+    "Română": "ro", "Romanian": "ro",
+    "Türkçe": "tr", "Turkish": "tr",
+    "Русский": "ru", "Russian": "ru",
+    "Українська": "uk", "Ukrainian": "uk",
+    "العربية": "ar", "Arabic": "ar",
+    "日本語": "ja", "Japanese": "ja",
+    "简体中文": "zh-CN", "Simplified Chinese": "zh-CN",
+    "繁體中文": "zh-TW", "Traditional Chinese": "zh-TW",
+}
+
+# ISO code → display name (populated at init from file english_name fields)
+_LANG_DISPLAY: dict[str, str] = {}
+
+
 class Translator:
     def __init__(self) -> None:
         self._langs: list[str] = []
@@ -450,22 +634,48 @@ class Translator:
             json_save(default_langpath, default_translation)
         self._translation["language_name"] = DEFAULT_LANG
         # load available translation names
+        self._lang_names: dict[str, str] = {}
         for filepath in LANG_PATH.glob("*.json"):
-            self._langs.append(filepath.stem)
+            code = filepath.stem
+            self._langs.append(code)
+            if code not in _LANG_DISPLAY:
+                # extract english_name from the file itself
+                try:
+                    data = json_load(filepath, {}, merge=False)
+                    display = data.get("english_name", code)
+                except Exception:
+                    display = code
+                _LANG_DISPLAY[code] = display
+            self._lang_names[code] = _LANG_DISPLAY.get(code, code)
         self._langs.sort()
         if DEFAULT_LANG in self._langs:
             self._langs.remove(DEFAULT_LANG)
         self._langs.insert(0, DEFAULT_LANG)
+        # ensure default lang has a display name
+        if DEFAULT_LANG not in self._lang_names:
+            self._lang_names[DEFAULT_LANG] = "English"
+
+    def language_display(self, code: str) -> str:
+        """Return the English display name for a language code."""
+        return self._lang_names.get(code, code)
 
     @property
     def languages(self) -> abc.Iterable[str]:
         return iter(self._langs)
 
     @property
+    def languages_display(self) -> abc.Iterable[str]:
+        """Return display names in the same order as `languages`."""
+        for code in self._langs:
+            yield self.language_display(code)
+
+    @property
     def current(self) -> str:
         return self._translation["language_name"]
 
     def set_language(self, language: str):
+        # Resolve old full-name aliases to ISO codes
+        language = _LANG_ALIASES.get(language, language)
         if language not in self._langs:
             raise ValueError("Unrecognized language")
         elif self._translation["language_name"] == language:
