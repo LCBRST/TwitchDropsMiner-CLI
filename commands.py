@@ -158,11 +158,11 @@ class CommandRegistry:
             ),
             Command("proxy", "Show or set the HTTP proxy", _cmd_proxy, usage="proxy [<url>|clear]"),
             Command(
-                "lang",                                                                                                                                             
-                "Show or list languages, or set the current language",                                                                                              
-                _cmd_lang,                                                                                                                                          
-                usage="lang [-ls | --list] | lang <code>",                                                                                                          
-            ),                                                                                                                                                      
+                "lang",
+                "Show or list languages, or set the current language",
+                _cmd_lang,
+                usage="lang [-ls | --list] | lang <code>",
+            ),
             Command(
                 "quality",
                 "Show or set the connection quality (0=lowest..2=highest)",
@@ -318,6 +318,7 @@ async def _cmd_inventory(ctx: CommandContext) -> None:
     if not inv:
         ctx.cli.print(_("cli", "commands", "inv_empty"))
         return
+    bar_w = 16
     for camp in inv:
         flags = []
         if getattr(camp, "upcoming", False):
@@ -327,7 +328,10 @@ async def _cmd_inventory(ctx: CommandContext) -> None:
         if getattr(camp, "active", False):
             flags.append(_("cli", "commands", "inv_flag_active"))
         flag_str = (" [" + ", ".join(flags) + "]") if flags else ""
+        c_bar = ctx.cli._render_bar(camp.progress, bar_w) if camp.total_drops > 0 else ""
         ctx.cli.print(f"• {camp.game.name}: {camp.name}{flag_str}")
+        if c_bar:
+            ctx.cli.print(f"  Campaign: {c_bar} ({camp.claimed_drops}/{camp.total_drops} claimed)")
         for drop in getattr(camp, "drops", []):
             done = "✓" if getattr(drop, "is_claimed", False) else " "
             try:
@@ -335,7 +339,9 @@ async def _cmd_inventory(ctx: CommandContext) -> None:
                 req = drop.required_minutes
             except Exception:
                 cur = req = 0
-            ctx.cli.print(f"    [{done}] {drop.name}  {cur}/{req}m")
+            d_bar = ctx.cli._render_bar(drop.progress, 12) if req > 0 else ""
+            bar_str = f"  {d_bar}" if d_bar else ""
+            ctx.cli.print(f"    [{done}] {drop.name}  {cur}/{req}m{bar_str}")
 
 
 async def _cmd_campaigns(ctx: CommandContext) -> None:
@@ -352,9 +358,28 @@ async def _cmd_drops(ctx: CommandContext) -> None:
     if drop is None:
         ctx.cli.print(_("cli", "commands", "inv_no_drop"))
         return
-    ctx.cli.print(
-        _("cli", "commands", "inv_drop_progress").format(name=drop.name, current=drop.current_minutes, required=drop.required_minutes)
-    )
+    campaign = drop.campaign
+    bar_w = 25
+    c_bar = ctx.cli._render_bar(campaign.progress, bar_w)
+    d_bar = ctx.cli._render_bar(drop.progress, bar_w)
+    ctx.cli.print(_("cli", "commands", "inv_drop_header").format(
+        game=campaign.game.name,
+        campaign=campaign.name,
+        drop=drop.name,
+        rewards=drop.rewards_text(),
+    ))
+    ctx.cli.print(_("cli", "commands", "inv_drop_campaign").format(
+        bar=c_bar,
+        pct=f"{campaign.progress:.0%}",
+        claimed=campaign.claimed_drops,
+        total=campaign.total_drops,
+    ))
+    ctx.cli.print(_("cli", "commands", "inv_drop_progress").format(
+        bar=d_bar,
+        pct=f"{drop.progress:.0%}",
+        current=drop.current_minutes,
+        required=drop.required_minutes,
+    ))
 
 
 async def _cmd_claim(ctx: CommandContext) -> None:
@@ -560,14 +585,14 @@ async def _cmd_lang(ctx: CommandContext) -> None:
     if not ctx.args:
         ctx.cli.print(_("cli", "commands", "lang_current").format(lang=s.language))
         return
-    if ctx.args[0] in ("-ls", "--list"):                                                                                                                            
-        ctx.cli.print(_("cli", "commands", "lang_list_header"))                                                                                                     
-        for code in _.languages:                                                                                                                                    
-            display = _.language_display(code)                                                                                                                      
-            mark = " *" if code == s.language else ""                                                                                                               
-            ctx.cli.print(                                                                                                                                          
-                _("cli", "commands", "lang_list_entry").format(code=code, display=display, mark=mark)                                                               
-            )                                                                                                                                                       
+    if ctx.args[0] in ("-ls", "--list"):
+        ctx.cli.print(_("cli", "commands", "lang_list_header"))
+        for code in _.languages:
+            display = _.language_display(code)
+            mark = " *" if code == s.language else ""
+            ctx.cli.print(
+                _("cli", "commands", "lang_list_entry").format(code=code, display=display, mark=mark)
+            )
         return
     s.language = ctx.args[0]
     s.save()

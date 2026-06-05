@@ -275,6 +275,12 @@ default_cli_translation: CLIMessages = {
     "drop": {
         "cleared": "[drop] cleared",
         "active": "[drop] {name} — {current}/{required}m",
+        "active_full": (
+            "[drop] {campaign} ({game})\n"
+            "[drop] Drop: {drop_name} ({rewards})\n"
+            "[drop] Campaign: {c_bar} {c_pct} ({c_claimed}/{c_total} claimed)\n"
+            "[drop] Progress: {d_bar} {d_pct} ({current}/{required}m)"
+        ),
     },
     "watch": {
         "watching": "[watch] {channel} ({game})",
@@ -325,7 +331,9 @@ default_cli_translation: CLIMessages = {
         "inv_empty": "inventory is empty (try 'resume' or wait for the next refresh)",
         "inv_no_campaigns": "no campaigns",
         "inv_no_drop": "no active drop",
-        "inv_drop_progress": "{name} — {current}/{required}m",
+        "inv_drop_header": "Game: {game}  Campaign: {campaign}\nDrop: {drop} ({rewards})",
+        "inv_drop_campaign": "Campaign progress: {bar} {pct} ({claimed}/{total} claimed)",
+        "inv_drop_progress": "Drop progress:     {bar} {pct} ({current}/{required}m)",
         "inv_flag_upcoming": "upcoming",
         "inv_flag_ineligible": "ineligible",
         "inv_flag_active": "active",
@@ -363,7 +371,7 @@ default_cli_translation: CLIMessages = {
         "proxy_set": "proxy set to {url}",
         "lang_current": "lang: {lang}",
         "lang_set": "lang set to {lang} (effective on next start)",
-        "lang_list_header": "Available languages (* = current):",                                                                                                   
+        "lang_list_header": "Available languages (* = current):",
         "lang_list_entry": "  {code:<6} {display}{mark}",
         "quality_current": "quality: {q}",
         "quality_must_be_int": "quality must be an integer 0..2",

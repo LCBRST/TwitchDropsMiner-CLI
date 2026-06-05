@@ -164,8 +164,25 @@ class _CLIProgress:
             return
         # Avoid spamming when the same drop just gets a per-minute tick
         if prev is None or prev.id != drop.id:
+            campaign = drop.campaign
+            bar_w = 20
+            c_bar = self._cli._render_bar(campaign.progress, bar_w)
+            d_bar = self._cli._render_bar(drop.progress, bar_w)
             self._cli.print(
-                _("cli", "drop", "active").format(name=drop.name, current=drop.current_minutes, required=drop.required_minutes)
+                _("cli", "drop", "active_full").format(
+                    campaign=campaign.name,
+                    game=campaign.game.name,
+                    c_bar=c_bar,
+                    c_pct=f"{campaign.progress:.0%}",
+                    c_claimed=campaign.claimed_drops,
+                    c_total=campaign.total_drops,
+                    drop_name=drop.name,
+                    rewards=drop.rewards_text(),
+                    d_bar=d_bar,
+                    d_pct=f"{drop.progress:.0%}",
+                    current=drop.current_minutes,
+                    required=drop.required_minutes,
+                )
             )
 
 
@@ -547,6 +564,19 @@ class CLIManager:
         self.progress.display(None)
         self.tray.update_title(None)
 
+    # ----- progress bar rendering ------------------------------------------
+
+    @staticmethod
+    def _render_bar(progress: float, width: int = 20) -> str:
+        """Render an ASCII progress bar like '████████░░░░░░ 45%'."""
+        if progress < 0:
+            progress = 0.0
+        elif progress > 1:
+            progress = 1.0
+        filled = int(progress * width)
+        bar = "█" * filled + "░" * (width - filled)
+        return f"{bar} {progress:.0%}"
+
     # ----- output buffer ---------------------------------------------------
 
     @property
@@ -574,12 +604,16 @@ class CLIManager:
         ]
 
     def _status_text(self) -> str:
-        """Right-aligned drop progress for the status line."""
+        """Right-aligned campaign + drop progress bars for the status line."""
         drop = self.progress.current
         if drop is not None:
+            campaign = drop.campaign
+            bar_w = 16
+            c_bar = self._render_bar(campaign.progress, bar_w)
+            d_bar = self._render_bar(drop.progress, bar_w)
             return (
-                f"★ {drop.name}  "
-                f"{drop.current_minutes}/{drop.required_minutes}m"
+                f"Campaign: {c_bar} ({campaign.claimed_drops}/{campaign.total_drops})\n"
+                f"Drop:     {d_bar} ({drop.current_minutes}/{drop.required_minutes}m)"
             )
         return ""
 
@@ -678,7 +712,7 @@ class CLIManager:
 
             status_window = ConditionalContainer(
                 content=Window(
-                    height=1,
+                    height=2,
                     content=FormattedTextControl(
                         lambda: self._status_text()
                     ),
