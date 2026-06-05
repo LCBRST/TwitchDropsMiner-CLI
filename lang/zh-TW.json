@@ -5,6 +5,7 @@
         "separator": "============================================================",
         "eof": "收到 EOF — 正在關閉。",
         "status": "[狀態] {text}",
+        "status_progress": "[狀態] {text} {bar} ({cur}/{total})",
         "notify": "[{title}] {text}",
         "drop": {
             "cleared": "[掉寶] 已清除",

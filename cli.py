@@ -25,6 +25,7 @@ shell that dispatches user commands to `commands.CommandRegistry`.
 
 from __future__ import annotations
 
+import re
 import sys
 import asyncio
 import logging
@@ -120,16 +121,36 @@ class _CLITray:
 
 
 class _CLIStatus:
+    # Extract "(N/M)" progress counters so we can render a bar once
+    # instead of flooding the log with near-identical lines.
+    # Only prints when the counter reaches completion (cur >= total).
+    _COUNTER_RE = re.compile(r"^(.*?)\s*\((\d+)/(\d+)\)$")
+
     def __init__(self, cli: CLIManager) -> None:
         self._cli = cli
         self.text: str = "idle"
+        self._seen: set[str] = set()
 
     def update(self, text: str) -> None:
         self.text = text
+        m = self._COUNTER_RE.match(text)
+        if m:
+            base = m.group(1).strip()
+            cur, total = int(m.group(2)), int(m.group(3))
+            if base not in self._seen and cur >= total and total > 0:
+                self._seen.add(base)
+                bar = self._cli._render_bar(1.0, 16)
+                self._cli.print(
+                    _("cli", "status_progress").format(
+                        text=base, bar=bar, cur=cur, total=total,
+                    )
+                )
+            return
         self._cli.print(_("cli", "status").format(text=text))
 
     def clear(self) -> None:
         self.text = ""
+        self._seen.clear()
 
 
 class _CLIProgress:
@@ -654,6 +675,10 @@ class CLIManager:
             @kb.add("enter")
             def _submit(event):
                 text = input_buffer.text
+                # Manually feed the history — the custom key binding bypasses
+                # the Buffer's accept flow that would normally do this.
+                if input_buffer.history is not None:
+                    input_buffer.history.append_string(text)
                 input_buffer.reset()
                 if text.strip():
                     asyncio.ensure_future(self._dispatch_cmd(text))
@@ -672,12 +697,14 @@ class CLIManager:
             # Log view scrolling — pause auto-follow when browsing history.
             @kb.add("pageup")
             def _page_up(event):
-                log_buffer.cursor_up(event.app.renderer.rows - 2)
+                rows = event.app.output.get_size().rows
+                log_buffer.cursor_up(max(rows - 2, 1))
                 self._log_follow = False
 
             @kb.add("pagedown")
             def _page_down(event):
-                log_buffer.cursor_down(event.app.renderer.rows - 2)
+                rows = event.app.output.get_size().rows
+                log_buffer.cursor_down(max(rows - 2, 1))
                 if log_buffer.cursor_position >= len(log_buffer.text) - 1:
                     self._log_follow = True
 
@@ -748,11 +775,24 @@ class CLIManager:
             try:
                 await app.run_async()
             finally:
+                # Trim the history file to _HISTORY_LENGTH lines.
+                if _HISTORY_PATH.exists():
+                    try:
+                        lines = _HISTORY_PATH.read_text(encoding="utf-8").splitlines(True)
+                        if len(lines) > _HISTORY_LENGTH:
+                            _HISTORY_PATH.write_text(
+                                "".join(lines[-_HISTORY_LENGTH:]), encoding="utf-8"
+                            )
+                    except OSError:
+                        pass
                 self._app = None
                 self._log_follow = True
 
         async def _dispatch_cmd(self, line: str) -> None:
             """Handle a command entered in the TUI input line."""
+            # Print a thin separator so consecutive commands
+            # are visually distinct in the log.
+            self.print("─" * 56)
             try:
                 await self._registry.dispatch(line)
             except ExitRequest:
@@ -799,6 +839,7 @@ class CLIManager:
                     self._redraw_prompt()
                     continue
                 try:
+                    self.print("─" * 56)
                     await self._registry.dispatch(raw_line)
                 except ExitRequest:
                     if _HAS_READLINE:

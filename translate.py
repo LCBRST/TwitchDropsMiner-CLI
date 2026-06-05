@@ -271,6 +271,7 @@ default_cli_translation: CLIMessages = {
     "separator": "=" * 60,
     "eof": "Got EOF on stdin — closing.",
     "status": "[status] {text}",
+    "status_progress": "[status] {text} {bar} ({cur}/{total})",
     "notify": "[{title}] {text}",
     "drop": {
         "cleared": "[drop] cleared",
