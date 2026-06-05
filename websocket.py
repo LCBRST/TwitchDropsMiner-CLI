@@ -248,7 +248,7 @@ class Websocket:
         assert ws is not None
         while True:
             try:
-               raw_message: aiohttp.WSMessage = await ws.receive(timeout=timeout)
+                raw_message: aiohttp.WSMessage = await ws.receive(timeout=timeout)
             except aiohttp.ClientConnectionError:
                 raise WebsocketClosed(received=False)
             ws_logger.debug(f"Websocket[{self._idx}] received: {raw_message}")

@@ -427,7 +427,13 @@ class DropsCampaign:
 
     @property
     def progress(self) -> float:
-        return sum(d.progress for d in self.drops) / self.total_drops
+        total_required = sum(d.required_minutes for d in self.drops)
+        if total_required <= 0:
+            return 0.0
+        total_current = sum(d.current_minutes for d in self.drops)
+        if total_current >= total_required:
+            return 1.0
+        return total_current / total_required
 
     @property
     def availability(self) -> float:

@@ -105,7 +105,6 @@ venv/bin/pip install -r requirements.txt
 ```bash
 python main.py            # 交互式 shell
 python main.py --no-shell # 守护模式，无提示符，只有日志
-TDM_GUI=1 python main.py  # 切回原版 tkinter GUI
 ```
 
 第一次运行时会打印 Twitch device-code 激活页 URL 和一个 8 位 code。

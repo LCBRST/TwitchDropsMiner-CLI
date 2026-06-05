@@ -169,6 +169,13 @@ class CommandRegistry:
                 _cmd_quality,
                 usage="quality [0|1|2]",
             ),
+            Command(
+                "reload-interval",
+                "Show or set inventory reload interval in minutes",
+                _cmd_reload_interval,
+                ("interval",),
+                usage="reload-interval [<minutes>]",
+            ),
             Command("get", "Print a setting value", _cmd_get, usage="get <key>"),
             Command("set", "Update a setting value", _cmd_set, usage="set <key> <value>"),
             Command("save", "Persist settings to disk now", _cmd_save),
@@ -617,10 +624,28 @@ async def _cmd_quality(ctx: CommandContext) -> None:
     ctx.cli.print(_("cli", "commands", "quality_set").format(q=q))
 
 
+async def _cmd_reload_interval(ctx: CommandContext) -> None:
+    s = _settings(ctx)
+    if not ctx.args:
+        ctx.cli.print(_("cli", "commands", "reload_interval_current").format(minutes=s.reload_interval))
+        return
+    try:
+        minutes = int(ctx.args[0])
+    except ValueError:
+        ctx.cli.print(_("cli", "commands", "reload_interval_must_be_int"))
+        return
+    if not 10 <= minutes <= 1440:
+        ctx.cli.print(_("cli", "commands", "reload_interval_range"))
+        return
+    s.reload_interval = minutes
+    s.save()
+    ctx.cli.print(_("cli", "commands", "reload_interval_set").format(minutes=minutes))
+
+
 _GETTABLE_KEYS = (
     "priority", "exclude", "priority_mode", "language", "proxy",
-    "connection_quality", "tray_notifications", "enable_badges_emotes",
-    "available_drops_check", "dark_mode", "autostart_tray",
+    "connection_quality", "reload_interval", "tray_notifications",
+    "enable_badges_emotes", "available_drops_check", "dark_mode", "autostart_tray",
 )
 
 

@@ -4,7 +4,6 @@
 # Usage:
 #   ./build_cli.sh                    # build single-file CLI binary -> dist/
 #   ./build_cli.sh --one-dir          # one-folder build (faster startup)
-#   ./build_cli.sh --keep-gui         # include the original GUI build too
 #   ./build_cli.sh --upx              # use UPX compression (smaller, slower)
 #   ./build_cli.sh --clean            # remove dist/ build/ first
 #   ./build_cli.sh --name <name>      # override binary name
@@ -21,14 +20,13 @@ do_clean=0
 export ONE_FILE="${ONE_FILE:-1}"
 export USE_UPX="${USE_UPX:-0}"
 export EXCLUDE_GUI="${EXCLUDE_GUI:-1}"
-export APP_NAME="${APP_NAME:-twitch-drops-miner-cli}"
+export APP_NAME="${APP_NAME:-TwitchDropsMiner-CLI}"
 export OPTIMIZE="${OPTIMIZE:-1}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --one-dir)   export ONE_FILE=0; shift ;;
         --one-file)  export ONE_FILE=1; shift ;;
-        --keep-gui)  export EXCLUDE_GUI=0; shift ;;
         --upx)       export USE_UPX=1; shift ;;
         --clean)     do_clean=1; shift ;;
         --name)      export APP_NAME="${2:-}"; shift 2 ;;

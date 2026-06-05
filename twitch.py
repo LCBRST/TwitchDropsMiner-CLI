@@ -56,7 +56,6 @@ from constants import (
 
 if TYPE_CHECKING:
     from utils import Game
-    from gui import LoginForm
     from channel import Stream
     from settings import Settings
     from inventory import TimedDrop
@@ -107,7 +106,7 @@ class _AuthState:
         self._logged_in.clear()
 
     async def _oauth_login(self) -> str:
-        login_form: LoginForm = self._twitch.gui.login
+        login_form = self._twitch.gui.login
         client_info: ClientInfo = self._twitch._client_type
         headers = {
             "Accept": "application/json",
@@ -183,7 +182,7 @@ class _AuthState:
     async def _login(self) -> str:
         logger.info("Login flow started")
         gui_print = self._twitch.gui.print
-        login_form: LoginForm = self._twitch.gui.login
+        login_form = self._twitch.gui.login
         client_info: ClientInfo = self._twitch._client_type
 
         token_kind: str = ''
@@ -369,7 +368,7 @@ class _AuthState:
             self.device_id = cookie["unique_id"].value
         if not self._hasattrs("access_token", "user_id"):
             # looks like we're missing something
-            login_form: LoginForm = self._twitch.gui.login
+            login_form = self._twitch.gui.login
             logger.info("Checking login")
             login_form.update(_("gui", "login", "logging_in"), None)
             for client_mismatch_attempt in range(2):
@@ -438,14 +437,10 @@ class Twitch:
         self._client_type: ClientInfo = ClientType.ANDROID_APP
         self._session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
-        # GUI / CLI manager. CLI is the default; set TDM_GUI=1 to use the
-        # original tkinter GUI build.
         if os.environ.get("TDM_GUI") == "1":
-            from gui import GUIManager
-            self.gui = GUIManager(self)
-        else:
-            from cli import CLIManager
-            self.gui = CLIManager(self)
+            raise ImportError("GUI is not available — install the upstream release.")
+        from cli import CLIManager
+        self.gui = CLIManager(self)
         # Storing and watching channels
         self.channels: OrderedDict[int, Channel] = OrderedDict()
         self.watching_channel: AwaitableValue[Channel] = AwaitableValue()
@@ -955,7 +950,11 @@ class Twitch:
     @task_wrapper(critical=True)
     async def _maintenance_task(self) -> None:
         now = datetime.now(timezone.utc)
-        next_period = now + timedelta(hours=1)
+        interval = max(self.settings.reload_interval, 10)
+        # Align to interval-boundary from epoch (e.g. interval=60 → xx:00).
+        epoch_minutes = int(now.timestamp() // 60)
+        next_aligned = ((epoch_minutes // interval) + 1) * interval
+        next_period = datetime.fromtimestamp(next_aligned * 60, tz=timezone.utc)
         while True:
             # exit if there's no need to repeat the loop
             now = datetime.now(timezone.utc)
@@ -980,8 +979,8 @@ class Twitch:
             if next_trigger != next_period:
                 logger.log(CALL, "Maintenance task requests channels cleanup")
                 self.change_state(State.CHANNELS_CLEANUP)
-        # this triggers a restart of this task every (up to) 60 minutes
-        logger.log(CALL, "Maintenance task requests a reload")
+        # this triggers a restart of this task every interval
+        logger.log(CALL, f"Maintenance task requests a reload (interval={interval}m)")
         self.change_state(State.INVENTORY_FETCH)
 
     def can_watch(self, channel: Channel) -> bool:

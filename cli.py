@@ -772,9 +772,25 @@ class CLIManager:
             if self._output_lines:
                 log_buffer.text = "\n".join(self._output_lines) + "\n"
 
+            # Periodic refresh keeps the status-line progress bars
+            # alive even when no other print activity is happening.
+            async def _refresh_tui() -> NoReturn:
+                while True:
+                    await asyncio.sleep(60)
+                    try:
+                        app.invalidate()
+                    except Exception:
+                        pass
+
+            _refresh_task = asyncio.create_task(_refresh_tui(), name="tui-refresh")
             try:
                 await app.run_async()
             finally:
+                _refresh_task.cancel()
+                try:
+                    await _refresh_task
+                except asyncio.CancelledError:
+                    pass
                 # Trim the history file to _HISTORY_LENGTH lines.
                 if _HISTORY_PATH.exists():
                     try:

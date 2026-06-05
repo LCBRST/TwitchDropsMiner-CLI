@@ -27,7 +27,7 @@ from constants import WORKING_DIR, DEFAULT_LANG  # noqa: E402
 # ---------------------------------------------------------------------------
 
 EXCLUDE_GUI = os.environ.get("EXCLUDE_GUI", "1") == "1"
-APP_NAME = os.environ.get("APP_NAME", "twitch-drops-miner-cli")
+APP_NAME = os.environ.get("APP_NAME", "TwitchDropsMiner-CLI")
 ONE_FILE = os.environ.get("ONE_FILE", "1") == "1"
 USE_UPX = os.environ.get("USE_UPX", "0") == "1"
 OPTIMIZE_LEVEL = int(os.environ.get("OPTIMIZE", "0") or "0")  # 0/1/2
@@ -65,7 +65,26 @@ if EXCLUDE_GUI:
 # Hidden imports: things PyInstaller's static analysis can miss.
 # ---------------------------------------------------------------------------
 
-hiddenimports: list[str] = []
+hiddenimports: list[str] = [
+    # prompt_toolkit — imported inside try/except ImportError in cli.py,
+    # so PyInstaller's static analysis won't discover them. Without these
+    # the binary silently degrades to the readline fallback.
+    "prompt_toolkit",
+    "prompt_toolkit.application",
+    "prompt_toolkit.buffer",
+    "prompt_toolkit.completion",
+    "prompt_toolkit.filters",
+    "prompt_toolkit.history",
+    "prompt_toolkit.key_binding",
+    "prompt_toolkit.layout",
+    "prompt_toolkit.layout.controls",
+    "prompt_toolkit.layout.processors",
+    "prompt_toolkit.styles",
+    "prompt_toolkit.formatted_text",
+    # gnureadline — optional readline replacement on Linux/macOS.
+    # Safe to include even if not installed (PyInstaller warns, doesn't error).
+    "gnureadline",
+]
 
 # ---------------------------------------------------------------------------
 # Analysis / build

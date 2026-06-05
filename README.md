@@ -116,7 +116,6 @@ venv/bin/pip install -r requirements.txt
 ```
 python main.py                # interactive shell
 python main.py --no-shell     # daemon mode
-TDM_GUI=1 python main.py      # original GUI
 ```
 
 ---
