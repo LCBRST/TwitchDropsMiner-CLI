@@ -252,8 +252,7 @@ async def _cmd_log(ctx: CommandContext) -> None:
 
 
 async def _cmd_clear(ctx: CommandContext) -> None:
-    sys.stdout.write("\x1b[2J\x1b[H")
-    sys.stdout.flush()
+    ctx.cli.clear_screen()
 
 
 async def _cmd_version(ctx: CommandContext) -> None:

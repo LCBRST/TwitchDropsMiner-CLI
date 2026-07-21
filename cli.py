@@ -48,11 +48,10 @@ try:
     from prompt_toolkit.application import Application
     from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.completion import Completer, Completion
-    from prompt_toolkit.filters import Condition
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import (
-        Layout, HSplit, Window, ConditionalContainer,
+        Layout, HSplit, Window,
     )
     from prompt_toolkit.layout.controls import (
         BufferControl, FormattedTextControl,
@@ -543,6 +542,27 @@ class CLIManager:
             except Exception:
                 pass
 
+    def clear_screen(self) -> None:
+        """Clear the log display area.
+
+        When the prompt_toolkit TUI is active the log buffer is cleared;
+        otherwise a best-effort ANSI escape is written to stdout.
+        """
+        app = getattr(self, "_app", None)
+        buf: Buffer | None = getattr(self, "_log_buffer", None)
+        if app is not None and buf is not None and app.is_running:
+            buf.text = ""
+            try:
+                app.invalidate()
+            except Exception:
+                pass
+        else:
+            try:
+                sys.stdout.write("\x1b[2J\x1b[H")
+                sys.stdout.flush()
+            except Exception:
+                pass
+
     def print(self, message: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
         line = f"[{ts}] {message}"
@@ -611,32 +631,54 @@ class CLIManager:
         "state": "#00aaaa italic",
         "separator": "#888888",
         "status": "#666666",
+        "topbar": "bg:#333333 #ffffff",
         "log": "",
         "input": "",
     }) if _HAS_PROMPT_TOOLKIT else None
 
     def _prompt_html(self):
-        """Styled prompt pieces (green prefix, cyan state)."""
+        """Styled prompt — just a simple arrow."""
         return [
-            ("class:prompt", "tdm"),
-            ("class:separator", "["),
-            ("class:state", self.tray.state),
-            ("class:separator", "]> "),
+            ("class:prompt", "> "),
         ]
 
-    def _status_text(self) -> str:
-        """Right-aligned campaign + drop progress bars for the status line."""
+    def _top_bar_text(self) -> str:
+        """Persistent top status bar: engine state, login, watching, counts, progress."""
+        from version import __version__
+        twitch = self._twitch
+        state_name = twitch._state.name if hasattr(twitch, "_state") else "?"
+        watching = self.channels._watching
         drop = self.progress.current
+        ws_count = len(self.websockets.entries)
+
+        # Line 1: core status
+        uid = f"({self.login.user_id})" if self.login.user_id else ""
+        parts = [
+            f"version: {__version__}",
+            f"Engine: {state_name}",
+            f"Login: {self.login.status}{uid}",
+        ]
+        if watching is not None:
+            parts.append(f"Watch: {watching.name}")
+        parts.append(f"Campaigns: {len(twitch.inventory)}/{len(twitch.wanted_games)}")
+        parts.append(f"Ch: {len(twitch.channels)}")
+        if ws_count:
+            parts.append(f"WS: {ws_count}")
+        line1 = " │ ".join(parts)
+
+        # Line 2: drop progress (right-aligned)
         if drop is not None:
             campaign = drop.campaign
-            bar_w = 16
+            bar_w = 14
             c_bar = self._render_bar(campaign.progress, bar_w)
             d_bar = self._render_bar(drop.progress, bar_w)
-            return (
-                f"Campaign: {c_bar} ({campaign.claimed_drops}/{campaign.total_drops})\n"
-                f"Drop:     {d_bar} ({drop.current_minutes}/{drop.required_minutes}m)"
+            line2 = (
+                f"Campaign: {c_bar} ({campaign.claimed_drops}/{campaign.total_drops})  "
+                f"Drop: {d_bar} ({drop.current_minutes}/{drop.required_minutes}m)"
             )
-        return ""
+        else:
+            line2 = ""
+        return f"{line1}\n{line2}"
 
     _log_follow: bool = True  # auto-scroll to bottom on new output
 
@@ -720,6 +762,15 @@ class CLIManager:
 
             # ---- layout ----------------------------------------------------
 
+            top_bar = Window(
+                height=2,
+                content=FormattedTextControl(
+                    lambda: self._top_bar_text()
+                ),
+                style="class:topbar",
+                align="RIGHT",
+            )
+
             log_window = Window(
                 content=BufferControl(
                     buffer=log_buffer,
@@ -737,21 +788,9 @@ class CLIManager:
                 ),
             )
 
-            status_window = ConditionalContainer(
-                content=Window(
-                    height=2,
-                    content=FormattedTextControl(
-                        lambda: self._status_text()
-                    ),
-                    style="class:status",
-                    align="RIGHT",
-                ),
-                filter=Condition(lambda: self.progress.current is not None),
-            )
-
             root = HSplit([
+                top_bar,
                 log_window,
-                status_window,
                 input_window,
             ])
 
