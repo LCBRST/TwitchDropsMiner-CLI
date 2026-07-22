@@ -1,15 +1,13 @@
 {
-    "english_name": "English",
     "cli": {
         "banner": "TwitchDropsMiner {version} (CLI)",
         "separator": "============================================================",
-        "eof": "Got EOF on stdin \u2014 closing.",
+        "eof": "Got EOF on stdin — closing.",
         "status": "[status] {text}",
         "status_progress": "[status] {text} {bar} ({cur}/{total})",
         "notify": "[{title}] {text}",
         "drop": {
             "cleared": "[drop] cleared",
-            "active": "[drop] {name} \u2014 {current}/{required}m",
             "active_full": "[drop] {campaign} ({game})\n[drop] Drop: {drop_name} ({rewards})\n[drop] Campaign: {c_bar} {c_pct} ({c_claimed}/{c_total} claimed)\n[drop] Progress: {d_bar} {d_pct} ({current}/{required}m)"
         },
         "watch": {
@@ -29,10 +27,11 @@
             "step_approve": "  3. Approve the login in your browser, then come back."
         },
         "commands": {
+            "welcome": "Welcome! It looks like this is your first run.\nHere's how to get started:\n  1. priority add <game>  — add games to your priority list\n  2. mode priority_only    — mine only priority-list games\n  3. resume               — start mining drops\n  Type 'help' to see all available commands.",
             "help_header": "Commands (type 'help <cmd>' for details):",
             "unknown": "unknown command: {name} (type 'help')",
             "parse_error": "parse error: {exc}",
-            "aliases_none": "\u2014",
+            "aliases_none": "—",
             "state": "state    : {state}",
             "tray": "tray     : {state}",
             "login": "login    : {status} (user_id={id})",
@@ -40,12 +39,22 @@
             "campaigns": "campaigns: {count}, wanted games: {wanted}",
             "channels_count": "channels : {count} known",
             "ws_entry": "  ws#{idx}: {status} ({topics} topics)",
-            "ws_none": "  ws: \u2014",
+            "ws_none": "  ws: —",
             "bad_number": "bad number: {value}",
             "version": "TwitchDropsMiner {version} (CLI)",
-            "paused": "paused \u2014 engine in IDLE",
-            "resumed": "resumed \u2014 fetching inventory",
-            "reloading": "reloading\u2026",
+            "about_header": "TwitchDropsMiner-CLI {version}",
+            "about_author": "Author: {author}",
+            "about_repo": "Repository: {url}",
+            "about_sponsor": "Sponsor: {url}",
+            "about_how_title": "How It Works",
+            "about_how_text": "Every several seconds, the application pretends to watch a particular stream by fetching stream metadata — this is enough to advance the drops. Note that this completely bypasses the need to download any actual stream of video and sound. To keep the status (ONLINE or OFFLINE) of the channels up-to-date, a websocket connection receives events about streams going up or down, or updates regarding the current number of viewers.",
+            "about_started_title": "Getting Started",
+            "about_started_text": "1. Login to the application.\n2. Ensure your Twitch account is linked to all campaigns you're interested in mining.\n3. Use 'priority add <game>' to add games to your priority list.\n4. Use 'mode priority_only' to mine only priority-list games.\n5. Use 'exclude add <game>' to never mine a specific game.\n6. Run 'reload' after changing priority/exclude lists for changes to take effect.",
+            "about_disclaimer_title": "Disclaimer",
+            "about_disclaimer": "1. This tool requires a Twitch login. Your account credentials are stored locally and are never collected or transmitted.\n2. Use at your own risk. We are not responsible for any account issues, including but not limited to bans or suspensions, resulting from the use of this tool.\n3. Please verify claimed drops on the Twitch Drops Inventory page.\n4. Some games may not reliably track watch time due to issues on Twitch's side.\n5. Closing the tool will stop all mining. Keep it running to continue earning drops.\n6. If new campaigns do not appear, try running 'reload' to refresh.",
+            "paused": "paused — engine in IDLE",
+            "resumed": "resumed — fetching inventory",
+            "reloading": "reloading…",
             "watch_usage": "usage: watch <channel-login>",
             "watch_not_found": "channel '{channel}' is not in the known list",
             "watch_hint": "hint: run 'channels' or 'resume' first to populate the list",
@@ -57,6 +66,7 @@
             "whoami_user": "user_id: {id}",
             "inv_empty": "inventory is empty (try 'resume' or wait for the next refresh)",
             "inv_no_campaigns": "no campaigns",
+            "inv_no_match": "no campaigns match the priority list",
             "inv_no_drop": "no active drop",
             "inv_drop_header": "Game: {game}  Campaign: {campaign}\nDrop: {drop} ({rewards})",
             "inv_drop_campaign": "Campaign progress: {bar} {pct} ({claimed}/{total} claimed)",
@@ -89,7 +99,6 @@
             "exc_unknown": "unknown subcommand: {sub}",
             "exc_usage_add": "usage: exclude add <game>",
             "exc_usage_remove": "usage: exclude remove <game>",
-            "mode_current": "{mode}",
             "mode_unknown": "unknown mode: {name}",
             "mode_valid": "valid: {modes}",
             "mode_set": "mode set to {name}",
@@ -133,12 +142,6 @@
     },
     "login": {
         "unexpected_content": "Unexpected content type returned, usually due to being redirected. Do you need to login for internet access?",
-        "chrome": {
-            "startup": "Opening Chrome...",
-            "login_to_complete": "Complete the login procedure manually by pressing the Login button again.",
-            "no_token": "No authorization token could be found.",
-            "closed_window": "The Chrome window was closed before the login procedure could be completed."
-        },
         "error_code": "Login error code: {error_code}",
         "incorrect_login_pass": "Incorrect username or password.",
         "incorrect_email_code": "Incorrect email code.",
@@ -152,9 +155,7 @@
         "no_connection": "Cannot connect to Twitch, retrying in {seconds} seconds... ({url})"
     },
     "gui": {
-        "output": "Output",
         "status": {
-            "name": "Status",
             "idle": "Idle",
             "exiting": "Exiting...",
             "terminated": "Terminated",
@@ -165,129 +166,20 @@
             "fetching_campaigns": "Fetching campaigns...",
             "adding_campaigns": "Adding campaigns to inventory... {counter}"
         },
-        "tabs": {
-            "main": "Main",
-            "inventory": "Inventory",
-            "settings": "Settings",
-            "help": "Help"
-        },
         "tray": {
-            "notification_title": "Mined Drop",
-            "minimize": "Minimize to Tray",
-            "show": "Show",
-            "quit": "Quit"
+            "notification_title": "Mined Drop"
         },
         "login": {
-            "name": "Login Form",
-            "labels": "Status:\nUser ID:",
             "logged_in": "Logged in",
-            "logged_out": "Logged out",
-            "logging_in": "Logging in...",
-            "required": "Login required",
-            "request": "Please log in to continue.",
-            "username": "Username",
-            "password": "Password",
-            "twofa_code": "2FA code (optional)",
-            "button": "Login"
+            "logging_in": "Logging in..."
         },
         "websocket": {
-            "name": "Websocket Status",
-            "websocket": "Websocket #{id}:",
             "initializing": "Initializing...",
             "connected": "Connected",
             "disconnected": "Disconnected",
             "connecting": "Connecting...",
             "disconnecting": "Disconnecting...",
             "reconnecting": "Reconnecting..."
-        },
-        "progress": {
-            "name": "Campaign Progress",
-            "drop": "Drop:",
-            "game": "Game:",
-            "campaign": "Campaign:",
-            "remaining": "{time} remaining",
-            "drop_progress": "Progress:",
-            "campaign_progress": "Progress:"
-        },
-        "channels": {
-            "name": "Channels",
-            "switch": "Switch",
-            "online": "ONLINE  \u2714",
-            "pending": "OFFLINE \u23f3",
-            "offline": "OFFLINE \u274c",
-            "headings": {
-                "channel": "Channel",
-                "status": "Status",
-                "game": "Game",
-                "viewers": "Viewers"
-            }
-        },
-        "inventory": {
-            "filter": {
-                "name": "Filter",
-                "show": "Show:",
-                "not_linked": "Not linked",
-                "upcoming": "Upcoming",
-                "expired": "Expired",
-                "excluded": "Excluded",
-                "finished": "Finished",
-                "refresh": "Refresh"
-            },
-            "status": {
-                "linked": "Linked \u2714",
-                "not_linked": "Not Linked \u274c",
-                "active": "Active \u2714",
-                "upcoming": "Upcoming \u23f3",
-                "expired": "Expired \u274c",
-                "claimed": "Claimed \u2714",
-                "ready_to_claim": "Ready to claim \u23f3"
-            },
-            "starts": "Starts: {time}",
-            "ends": "Ends: {time}",
-            "allowed_channels": "Allowed Channels:",
-            "all_channels": "All",
-            "and_more": "and {amount} more...",
-            "percent_progress": "{percent} of {minutes} minutes",
-            "minutes_progress": "{minutes} minutes"
-        },
-        "settings": {
-            "general": {
-                "name": "General",
-                "autostart": "Autostart: ",
-                "tray": "Autostart into tray: ",
-                "tray_notifications": "Tray notifications: ",
-                "dark_mode": "Dark mode: ",
-                "priority_mode": "Priority mode: ",
-                "proxy": "Proxy (requires restart):"
-            },
-            "advanced": {
-                "name": "Advanced",
-                "warning": "Warning!",
-                "warning_text": "These options will cause the miner to misbehave.\nIf you're experiencing any issues, make sure all of these options are disabled.",
-                "enable_badges_emotes": "Enable partial support for badges and emotes: ",
-                "available_drops_check": "Enable extra available drops check: "
-            },
-            "priority_modes": {
-                "priority_only": "Priority list only",
-                "ending_soonest": "Ending soonest",
-                "low_availability": "Low availability first"
-            },
-            "game_name": "Game name",
-            "priority": "Priority",
-            "exclude": "Exclude",
-            "reload": "Reload",
-            "reload_text": "Most changes require a reload to take an immediate effect: "
-        },
-        "help": {
-            "links": {
-                "name": "Useful Links",
-                "inventory": "See Twitch inventory",
-                "campaigns": "See all campaigns and manage account links"
-            },
-            "how_it_works": "How It Works",
-            "how_it_works_text": "Every several seconds, the application pretends to watch a particular stream by fetching stream metadata - this is enough to advance the drops. Note that this completely bypasses the need to download any actual stream of video and sound. To keep the status (ONLINE or OFFLINE) of the channels up-to-date, there's a websocket connection established that receives events about streams going up or down, or updates regarding the current number of viewers.",
-            "getting_started": "Getting Started",
-            "getting_started_text": "1. Login to the application.\n2. Ensure your Twitch account is linked to all campaigns you're interested in mining.\n3. If you're interested in mining everything possible, change the Priority Mode to anything other than \"Priority list only\" and press on \"Reload\".\n4. If you want to mine specific games first, use the \"Priority\" list to set up an ordered list of games of your choice. Games from the top of the list will be attempted to be mined first, before the ones lower down the list.\n5. Keep the \"Priority mode\" selected as \"Priority list only\", to avoid mining games that are not on the priority list. Or not - it's up to you.\n6. Use the \"Exclude\" list to tell the application which games should never be mined.\n7. Changing the contents of either of the lists, or changing the \"Priority mode\", requires you to press on \"Reload\" for the changes to take an effect."
         }
     }
 }

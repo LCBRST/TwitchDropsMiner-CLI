@@ -10,7 +10,6 @@ from constants import IS_PACKAGED, LANG_PATH, DEFAULT_LANG
 if TYPE_CHECKING:
     from typing_extensions import NotRequired
 
-
 class StatusMessages(TypedDict):
     terminated: str
     watching: str
@@ -20,13 +19,11 @@ class StatusMessages(TypedDict):
     no_channel: str
     no_campaign: str
 
-
 class ChromeMessages(TypedDict):
     startup: str
     login_to_complete: str
     no_token: str
     closed_window: str
-
 
 class LoginMessages(TypedDict):
     chrome: ChromeMessages
@@ -38,12 +35,10 @@ class LoginMessages(TypedDict):
     incorrect_email_code: str
     incorrect_twofa_code: str
 
-
 class ErrorMessages(TypedDict):
     captcha: str
     no_connection: str
     site_down: str
-
 
 class GUIStatus(TypedDict):
     name: str
@@ -57,20 +52,17 @@ class GUIStatus(TypedDict):
     fetching_campaigns: str
     adding_campaigns: str
 
-
 class GUITabs(TypedDict):
     main: str
     inventory: str
     settings: str
     help: str
 
-
 class GUITray(TypedDict):
     notification_title: str
     minimize: str
     show: str
     quit: str
-
 
 class GUILoginForm(TypedDict):
     name: str
@@ -85,7 +77,6 @@ class GUILoginForm(TypedDict):
     twofa_code: str
     button: str
 
-
 class GUIWebsocket(TypedDict):
     name: str
     websocket: str
@@ -96,7 +87,6 @@ class GUIWebsocket(TypedDict):
     disconnecting: str
     reconnecting: str
 
-
 class GUIProgress(TypedDict):
     name: str
     drop: str
@@ -106,13 +96,11 @@ class GUIProgress(TypedDict):
     drop_progress: str
     campaign_progress: str
 
-
 class GUIChannelHeadings(TypedDict):
     channel: str
     status: str
     game: str
     viewers: str
-
 
 class GUIChannels(TypedDict):
     name: str
@@ -121,7 +109,6 @@ class GUIChannels(TypedDict):
     pending: str
     offline: str
     headings: GUIChannelHeadings
-
 
 class GUIInvFilter(TypedDict):
     name: str
@@ -133,7 +120,6 @@ class GUIInvFilter(TypedDict):
     finished: str
     refresh: str
 
-
 class GUIInvStatus(TypedDict):
     linked: str
     not_linked: str
@@ -142,7 +128,6 @@ class GUIInvStatus(TypedDict):
     upcoming: str
     claimed: str
     ready_to_claim: str
-
 
 class GUIInventory(TypedDict):
     filter: GUIInvFilter
@@ -155,7 +140,6 @@ class GUIInventory(TypedDict):
     percent_progress: str
     minutes_progress: str
 
-
 class GUISettingsGeneral(TypedDict):
     name: str
     autostart: str
@@ -165,7 +149,6 @@ class GUISettingsGeneral(TypedDict):
     priority_mode: str
     proxy: str
 
-
 class GUISettingsAdvanced(TypedDict):
     name: str
     warning: str
@@ -173,12 +156,10 @@ class GUISettingsAdvanced(TypedDict):
     enable_badges_emotes: str
     available_drops_check: str
 
-
 class GUIPriorityModes(TypedDict):
     priority_only: str
     ending_soonest: str
     low_availability: str
-
 
 class GUISettings(TypedDict):
     general: GUISettingsGeneral
@@ -190,12 +171,10 @@ class GUISettings(TypedDict):
     reload: str
     reload_text: str
 
-
 class GUIHelpLinks(TypedDict):
     name: str
     inventory: str
     campaigns: str
-
 
 class GUIHelp(TypedDict):
     links: GUIHelpLinks
@@ -203,7 +182,6 @@ class GUIHelp(TypedDict):
     how_it_works_text: str
     getting_started: str
     getting_started_text: str
-
 
 class GUIMessages(TypedDict):
     output: str
@@ -218,7 +196,6 @@ class GUIMessages(TypedDict):
     settings: GUISettings
     help: GUIHelp
 
-
 class CLILoginMessages(TypedDict):
     status: str
     status_id: str
@@ -227,21 +204,17 @@ class CLILoginMessages(TypedDict):
     step_code: str
     step_approve: str
 
-
 class CLIDropMessages(TypedDict):
     cleared: str
     active: str
-
 
 class CLIWatchMessages(TypedDict):
     watching: str
     cleared: str
 
-
 class CLIWSMessages(TypedDict):
     status: str
     removed: str
-
 
 class CLIMessages(TypedDict):
     banner: str
@@ -255,7 +228,6 @@ class CLIMessages(TypedDict):
     login: CLILoginMessages
     commands: dict[str, str]
 
-
 class Translation(TypedDict):
     language_name: NotRequired[str]
     english_name: str
@@ -264,7 +236,6 @@ class Translation(TypedDict):
     error: ErrorMessages
     gui: GUIMessages
     cli: NotRequired[CLIMessages]
-
 
 default_cli_translation: CLIMessages = {
     "banner": "TwitchDropsMiner {version} (CLI)",
@@ -300,6 +271,14 @@ default_cli_translation: CLIMessages = {
         "step_approve": "  3. Approve the login in your browser, then come back.",
     },
     "commands": {
+        "welcome": (
+            "Welcome! It looks like this is your first run.\n"
+            "Here's how to get started:\n"
+            "  1. priority add <game>  — add games to your priority list\n"
+            "  2. mode priority_only    — mine only priority-list games\n"
+            "  3. resume               — start mining drops\n"
+            "  Type 'help' to see all available commands."
+        ),
         "help_header": "Commands (type 'help <cmd>' for details):",
         "unknown": "unknown command: {name} (type 'help')",
         "parse_error": "parse error: {exc}",
@@ -314,6 +293,41 @@ default_cli_translation: CLIMessages = {
         "ws_none": "  ws: —",
         "bad_number": "bad number: {value}",
         "version": "TwitchDropsMiner {version} (CLI)",
+        "about_header": "TwitchDropsMiner-CLI {version}",
+        "about_author": "Author: {author}",
+        "about_repo": "Repository: {url}",
+        "about_sponsor": "Sponsor: {url}",
+        "about_how_title": "How It Works",
+        "about_how_text": (
+            "Every several seconds, the application pretends to watch a particular "
+            "stream by fetching stream metadata — this is enough to advance the drops. "
+            "Note that this completely bypasses the need to download any actual stream "
+            "of video and sound. To keep the status (ONLINE or OFFLINE) of the channels "
+            "up-to-date, a websocket connection receives events about streams going up "
+            "or down, or updates regarding the current number of viewers."
+        ),
+        "about_started_title": "Getting Started",
+        "about_started_text": (
+            "1. Login to the application.\n"
+            "2. Ensure your Twitch account is linked to all campaigns you're interested in mining.\n"
+            "3. Use 'priority add <game>' to add games to your priority list.\n"
+            "4. Use 'mode priority_only' to mine only priority-list games.\n"
+            "5. Use 'exclude add <game>' to never mine a specific game.\n"
+            "6. Run 'reload' after changing priority/exclude lists for changes to take effect."
+        ),
+        "about_disclaimer_title": "Disclaimer",
+        "about_disclaimer": (
+            "1. This tool requires a Twitch login. Your account credentials are stored "
+            "locally and are never collected or transmitted.\n"
+            "2. Use at your own risk. We are not responsible for any account issues, "
+            "including but not limited to bans or suspensions, resulting from the use "
+            "of this tool.\n"
+            "3. Please verify claimed drops on the Twitch Drops Inventory page.\n"
+            "4. Some games may not reliably track watch time due to issues on Twitch's side.\n"
+            "5. Closing the tool will stop all mining. Keep it running to continue "
+            "earning drops.\n"
+            "6. If new campaigns do not appear, try running 'reload' to refresh."
+        ),
         "paused": "paused — engine in IDLE",
         "resumed": "resumed — fetching inventory",
         "reloading": "reloading…",
@@ -331,6 +345,7 @@ default_cli_translation: CLIMessages = {
         "whoami_user": "user_id: {id}",
         "inv_empty": "inventory is empty (try 'resume' or wait for the next refresh)",
         "inv_no_campaigns": "no campaigns",
+        "inv_no_match": "no campaigns match the priority list",
         "inv_no_drop": "no active drop",
         "inv_drop_header": "Game: {game}  Campaign: {campaign}\nDrop: {drop} ({rewards})",
         "inv_drop_campaign": "Campaign progress: {bar} {pct} ({claimed}/{total} claimed)",
@@ -414,16 +429,6 @@ default_translation: Translation = {
             "Unexpected content type returned, usually due to being redirected. "
             "Do you need to login for internet access?"
         ),
-        "chrome": {
-            "startup": "Opening Chrome...",
-            "login_to_complete": (
-                "Complete the login procedure manually by pressing the Login button again."
-            ),
-            "no_token": "No authorization token could be found.",
-            "closed_window": (
-                "The Chrome window was closed before the login procedure could be completed."
-            ),
-        },
         "error_code": "Login error code: {error_code}",
         "incorrect_login_pass": "Incorrect username or password.",
         "incorrect_email_code": "Incorrect email code.",
@@ -437,9 +442,7 @@ default_translation: Translation = {
         "no_connection": "Cannot connect to Twitch, retrying in {seconds} seconds... ({url})",
     },
     "gui": {
-        "output": "Output",
         "status": {
-            "name": "Status",
             "idle": "Idle",
             "exiting": "Exiting...",
             "terminated": "Terminated",
@@ -450,34 +453,14 @@ default_translation: Translation = {
             "fetching_campaigns": "Fetching campaigns...",
             "adding_campaigns": "Adding campaigns to inventory... {counter}",
         },
-        "tabs": {
-            "main": "Main",
-            "inventory": "Inventory",
-            "settings": "Settings",
-            "help": "Help",
-        },
         "tray": {
             "notification_title": "Mined Drop",
-            "minimize": "Minimize to Tray",
-            "show": "Show",
-            "quit": "Quit",
         },
         "login": {
-            "name": "Login Form",
-            "labels": "Status:\nUser ID:",
             "logged_in": "Logged in",
-            "logged_out": "Logged out",
             "logging_in": "Logging in...",
-            "required": "Login required",
-            "request": "Please log in to continue.",
-            "username": "Username",
-            "password": "Password",
-            "twofa_code": "2FA code (optional)",
-            "button": "Login",
         },
         "websocket": {
-            "name": "Websocket Status",
-            "websocket": "Websocket #{id}:",
             "initializing": "Initializing...",
             "connected": "Connected",
             "disconnected": "Disconnected",
@@ -510,7 +493,6 @@ default_translation: Translation = {
         "inventory": {
             "filter": {
                 "name": "Filter",
-                "show": "Show:",
                 "not_linked": "Not linked",
                 "upcoming": "Upcoming",
                 "expired": "Expired",
@@ -608,7 +590,6 @@ default_translation: Translation = {
     },
 }
 
-
 # Backward compatible aliases: old full language names → ISO 639-1 codes
 _LANG_ALIASES: dict[str, str] = {
     "English": "en", "Čeština": "cs", "Czech": "cs",
@@ -634,7 +615,6 @@ _LANG_ALIASES: dict[str, str] = {
 
 # ISO code → display name (populated at init from file english_name fields)
 _LANG_DISPLAY: dict[str, str] = {}
-
 
 class Translator:
     def __init__(self) -> None:
@@ -718,6 +698,5 @@ class Translator:
                 f"{self.current} translation is missing the '{' -> '.join(path)}' translation key"
             )
         return v
-
 
 _ = Translator()

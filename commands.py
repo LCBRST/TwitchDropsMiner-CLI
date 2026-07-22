@@ -109,6 +109,7 @@ class CommandRegistry:
             Command("log", "Print the last N output lines (default 20)", _cmd_log, usage="log [N]"),
             Command("clear", "Clear the screen", _cmd_clear),
             Command("version", "Show the running version", _cmd_version),
+            Command("about", "Show project information and links", _cmd_about),
 
             Command("login", "Force a fresh OAuth device-code login", _cmd_login),
             Command("whoami", "Show the logged-in Twitch user id", _cmd_whoami),
@@ -201,17 +202,17 @@ async def _cmd_help(ctx: CommandContext) -> None:
         target = ctx.args[0].lower()
         cmd = registry.find(target)
         if cmd is None:
-            ctx.cli.print(_("cli", "commands", "unknown").format(name=target))
+            ctx.cli.print_raw(_("cli", "commands", "unknown").format(name=target))
             return
         aliases = ", ".join(cmd.aliases) or _("cli", "commands", "aliases_none")
-        ctx.cli.print(f"{cmd.name}  —  {cmd.summary}")
+        ctx.cli.print_raw(f"{cmd.name}  —  {cmd.summary}")
         if cmd.usage:
-            ctx.cli.print(f"  usage:   {cmd.usage}")
-        ctx.cli.print(f"  aliases: {aliases}")
+            ctx.cli.print_raw(f"  usage:   {cmd.usage}")
+        ctx.cli.print_raw(f"  aliases: {aliases}")
         return
-    ctx.cli.print(_("cli", "commands", "help_header"))
+    ctx.cli.print_raw(_("cli", "commands", "help_header"))
     for cmd in registry.all():
-        ctx.cli.print(f"  {cmd.name:<10}  {cmd.summary}")
+        ctx.cli.print_raw(f"  {cmd.name:<10}  {cmd.summary}")
 
 
 async def _cmd_exit(ctx: CommandContext) -> None:
@@ -222,19 +223,18 @@ async def _cmd_status(ctx: CommandContext) -> None:
     t = ctx.twitch
     cli = ctx.cli
     state_name = t._state.name if hasattr(t, "_state") else "?"
-    cli.print(_("cli", "commands", "state").format(state=state_name))
-    cli.print(_("cli", "commands", "tray").format(state=cli.tray.state))
-    cli.print(_("cli", "commands", "login").format(status=cli.login.status, id=cli.login.user_id))
+    cli.print_raw(_("cli", "commands", "state").format(state=state_name))
+    cli.print_raw(_("cli", "commands", "login").format(status=cli.login.status, id=cli.login.user_id))
     watching = t.watching_channel.get_with_default(None)
     none = _("cli", "commands", "aliases_none")
-    cli.print(_("cli", "commands", "watching").format(channel=(watching.name if watching else none)))
-    cli.print(_("cli", "commands", "campaigns").format(count=len(t.inventory), wanted=len(t.wanted_games)))
-    cli.print(_("cli", "commands", "channels_count").format(count=len(t.channels)))
+    cli.print_raw(_("cli", "commands", "watching").format(channel=(watching.name if watching else none)))
+    cli.print_raw(_("cli", "commands", "campaigns").format(count=len(t.inventory), wanted=len(t.wanted_games)))
+    cli.print_raw(_("cli", "commands", "channels_count").format(count=len(t.channels)))
     if cli.websockets.entries:
         for e in cli.websockets.entries:
-            cli.print(_("cli", "commands", "ws_entry").format(idx=e.idx, status=e.status, topics=e.topics))
+            cli.print_raw(_("cli", "commands", "ws_entry").format(idx=e.idx, status=e.status, topics=e.topics))
     else:
-        cli.print(_("cli", "commands", "ws_none"))
+        cli.print_raw(_("cli", "commands", "ws_none"))
 
 
 async def _cmd_log(ctx: CommandContext) -> None:
@@ -257,7 +257,25 @@ async def _cmd_clear(ctx: CommandContext) -> None:
 
 async def _cmd_version(ctx: CommandContext) -> None:
     from version import __version__
-    ctx.cli.print(_("cli", "commands", "version").format(version=__version__))
+    ctx.cli.print_raw(_("cli", "commands", "version").format(version=__version__))
+
+
+async def _cmd_about(ctx: CommandContext) -> None:
+    from version import __version__
+    cli = ctx.cli
+    cli.print_raw(_("cli", "commands", "about_header").format(version=__version__))
+    cli.print_raw(_("cli", "commands", "about_author").format(author="LCBRST"))
+    cli.print_raw(_("cli", "commands", "about_repo").format(url="https://github.com/LCBRST/TwitchDropsMiner-CLI"))
+    cli.print_raw(_("cli", "commands", "about_sponsor").format(url="https://ifdian.net/a/LCBRST"))
+    cli.print_raw("")
+    cli.print_raw(_("cli", "commands", "about_how_title"))
+    cli.print_raw(_("cli", "commands", "about_how_text"))
+    cli.print_raw("")
+    cli.print_raw(_("cli", "commands", "about_started_title"))
+    cli.print_raw(_("cli", "commands", "about_started_text"))
+    cli.print_raw("")
+    cli.print_raw(_("cli", "commands", "about_disclaimer_title"))
+    cli.print_raw(_("cli", "commands", "about_disclaimer"))
 
 
 # Login ---------------------------------------------------------------------
@@ -322,10 +340,17 @@ async def _cmd_unwatch(ctx: CommandContext) -> None:
 async def _cmd_inventory(ctx: CommandContext) -> None:
     inv = ctx.twitch.inventory
     if not inv:
-        ctx.cli.print(_("cli", "commands", "inv_empty"))
+        ctx.cli.print_raw(_("cli", "commands", "inv_empty"))
         return
+
+    wanted = {g.lower() for g in ctx.twitch.settings.priority}
+
     bar_w = 16
+    shown = 0
     for camp in inv:
+        if wanted and camp.game.name.lower() not in wanted:
+            continue
+        shown += 1
         flags = []
         if getattr(camp, "upcoming", False):
             flags.append(_("cli", "commands", "inv_flag_upcoming"))
@@ -335,9 +360,9 @@ async def _cmd_inventory(ctx: CommandContext) -> None:
             flags.append(_("cli", "commands", "inv_flag_active"))
         flag_str = (" [" + ", ".join(flags) + "]") if flags else ""
         c_bar = ctx.cli._render_bar(camp.progress, bar_w) if camp.total_drops > 0 else ""
-        ctx.cli.print(f"• {camp.game.name}: {camp.name}{flag_str}")
+        ctx.cli.print_raw(f"• {camp.game.name}: {camp.name}{flag_str}")
         if c_bar:
-            ctx.cli.print(f"  Campaign: {c_bar} ({camp.claimed_drops}/{camp.total_drops} claimed)")
+            ctx.cli.print_raw(f"  Campaign: {c_bar} ({camp.claimed_drops}/{camp.total_drops} claimed)")
         for drop in getattr(camp, "drops", []):
             done = "✓" if getattr(drop, "is_claimed", False) else " "
             try:
@@ -347,16 +372,17 @@ async def _cmd_inventory(ctx: CommandContext) -> None:
                 cur = req = 0
             d_bar = ctx.cli._render_bar(drop.progress, 12) if req > 0 else ""
             bar_str = f"  {d_bar}" if d_bar else ""
-            ctx.cli.print(f"    [{done}] {drop.name}  {cur}/{req}m{bar_str}")
-
+            ctx.cli.print_raw(f"    [{done}] {drop.name}  {cur}/{req}m{bar_str}")
+    if wanted and shown == 0:
+        ctx.cli.print_raw(_("cli", "commands", "inv_no_match"))
 
 async def _cmd_campaigns(ctx: CommandContext) -> None:
     inv = ctx.twitch.inventory
     if not inv:
-        ctx.cli.print(_("cli", "commands", "inv_no_campaigns"))
+        ctx.cli.print_raw(_("cli", "commands", "inv_no_campaigns"))
         return
     for camp in inv:
-        ctx.cli.print(f"• {camp.game.name}: {camp.name}")
+        ctx.cli.print_raw(f"• {camp.game.name}: {camp.name}")
 
 
 async def _cmd_drops(ctx: CommandContext) -> None:
@@ -407,7 +433,7 @@ async def _cmd_channels(ctx: CommandContext) -> None:
     show_all = "--all" in ctx.args
     chans = list(ctx.twitch.channels.values())
     if not chans:
-        ctx.cli.print(_("cli", "commands", "no_channels"))
+        ctx.cli.print_raw(_("cli", "commands", "no_channels"))
         return
     chans.sort(key=lambda c: (c.offline, c.name.lower()))
     for ch in chans:
@@ -417,7 +443,7 @@ async def _cmd_channels(ctx: CommandContext) -> None:
         flags = _("cli", "commands", "ch_online") if not ch.offline else _("cli", "commands", "ch_offline")
         viewers = getattr(ch, "viewers", None)
         v = f", {viewers} viewers" if viewers is not None and not ch.offline else ""
-        ctx.cli.print(f"  {ch.name:<25} {flags:<8} {game}{v}")
+        ctx.cli.print_raw(f"  {ch.name:<25} {flags:<8} {game}{v}")
 
 
 async def _cmd_online(ctx: CommandContext) -> None:
@@ -445,10 +471,10 @@ async def _cmd_priority(ctx: CommandContext) -> None:
     pri: list[str] = list(s.priority)
     if sub == "list":
         if not pri:
-            ctx.cli.print(_("cli", "commands", "pri_empty"))
+            ctx.cli.print_raw(_("cli", "commands", "pri_empty"))
             return
         for i, name in enumerate(pri):
-            ctx.cli.print(f"  {i}: {name}")
+            ctx.cli.print_raw(f"  {i}: {name}")
         return
     if sub == "add":
         if len(ctx.args) < 2:
@@ -512,10 +538,10 @@ async def _cmd_exclude(ctx: CommandContext) -> None:
     excl: set[str] = set(s.exclude)
     if sub == "list":
         if not excl:
-            ctx.cli.print(_("cli", "commands", "exc_empty"))
+            ctx.cli.print_raw(_("cli", "commands", "exc_empty"))
             return
         for name in sorted(excl):
-            ctx.cli.print(f"  {name}")
+            ctx.cli.print_raw(f"  {name}")
         return
     if sub == "add":
         if len(ctx.args) < 2:
@@ -562,7 +588,7 @@ async def _cmd_mode(ctx: CommandContext) -> None:
     name = ctx.args[0].lower()
     if name not in _MODE_NAMES:
         ctx.cli.print(_("cli", "commands", "mode_unknown").format(name=name))
-        ctx.cli.print(_("cli", "commands", "mode_valid").format(modes=", ".join(_MODE_NAMES)))
+        ctx.cli.print_raw(_("cli", "commands", "mode_valid").format(modes=", ".join(_MODE_NAMES)))
         return
     s.priority_mode = _MODE_NAMES[name]
     s.save()
@@ -573,7 +599,7 @@ async def _cmd_proxy(ctx: CommandContext) -> None:
     s = _settings(ctx)
     if not ctx.args:
         none = _("cli", "commands", "aliases_none")
-        ctx.cli.print(_("cli", "commands", "proxy_current").format(url=(s.proxy or none)))
+        ctx.cli.print_raw(_("cli", "commands", "proxy_current").format(url=(s.proxy or none)))
         return
     val = ctx.args[0]
     if val.lower() == "clear":
@@ -589,10 +615,10 @@ async def _cmd_proxy(ctx: CommandContext) -> None:
 async def _cmd_lang(ctx: CommandContext) -> None:
     s = _settings(ctx)
     if not ctx.args:
-        ctx.cli.print(_("cli", "commands", "lang_current").format(lang=s.language))
+        ctx.cli.print_raw(_("cli", "commands", "lang_current").format(lang=s.language))
         return
     if ctx.args[0] in ("-ls", "--list"):
-        ctx.cli.print(_("cli", "commands", "lang_list_header"))
+        ctx.cli.print_raw(_("cli", "commands", "lang_list_header"))
         for code in _.languages:
             display = _.language_display(code)
             mark = " *" if code == s.language else ""
@@ -608,7 +634,7 @@ async def _cmd_lang(ctx: CommandContext) -> None:
 async def _cmd_quality(ctx: CommandContext) -> None:
     s = _settings(ctx)
     if not ctx.args:
-        ctx.cli.print(_("cli", "commands", "quality_current").format(q=s.connection_quality))
+        ctx.cli.print_raw(_("cli", "commands", "quality_current").format(q=s.connection_quality))
         return
     try:
         q = int(ctx.args[0])
@@ -626,7 +652,7 @@ async def _cmd_quality(ctx: CommandContext) -> None:
 async def _cmd_reload_interval(ctx: CommandContext) -> None:
     s = _settings(ctx)
     if not ctx.args:
-        ctx.cli.print(_("cli", "commands", "reload_interval_current").format(minutes=s.reload_interval))
+        ctx.cli.print_raw(_("cli", "commands", "reload_interval_current").format(minutes=s.reload_interval))
         return
     try:
         minutes = int(ctx.args[0])
@@ -650,19 +676,19 @@ _GETTABLE_KEYS = (
 
 async def _cmd_get(ctx: CommandContext) -> None:
     if not ctx.args:
-        ctx.cli.print(_("cli", "commands", "get_known_keys"))
+        ctx.cli.print_raw(_("cli", "commands", "get_known_keys"))
         for k in _GETTABLE_KEYS:
             ctx.cli.print(f"  {k}")
         return
     key = ctx.args[0]
     s = _settings(ctx)
     if key not in s._settings:
-        ctx.cli.print(_("cli", "commands", "get_unknown_key").format(key=key))
+        ctx.cli.print_raw(_("cli", "commands", "get_unknown_key").format(key=key))
         return
     val = getattr(s, key)
     if isinstance(val, PriorityMode):
         val = val.name.lower()
-    ctx.cli.print(_("cli", "commands", "get_value").format(key=key, value=val))
+    ctx.cli.print_raw(_("cli", "commands", "get_value").format(key=key, value=val))
 
 
 async def _cmd_set(ctx: CommandContext) -> None:
@@ -688,7 +714,7 @@ async def _cmd_set(ctx: CommandContext) -> None:
             v = [part for part in raw.split(",") if part]
         elif isinstance(cur, PriorityMode):
             if raw not in _MODE_NAMES:
-                ctx.cli.print(_("cli", "commands", "mode_valid").format(modes=", ".join(_MODE_NAMES)))
+                ctx.cli.print_raw(_("cli", "commands", "mode_valid").format(modes=", ".join(_MODE_NAMES)))
                 return
             v = _MODE_NAMES[raw]
         else:
@@ -720,11 +746,11 @@ _LEVEL_BY_NAME = {
 async def _cmd_level(ctx: CommandContext) -> None:
     log = logging.getLogger("TwitchDrops")
     if not ctx.args:
-        ctx.cli.print(_("cli", "commands", "level_current").format(level=logging.getLevelName(log.getEffectiveLevel())))
+        ctx.cli.print_raw(_("cli", "commands", "level_current").format(level=logging.getLevelName(log.getEffectiveLevel())))
         return
     name = ctx.args[0].upper()
     if name not in _LEVEL_BY_NAME:
-        ctx.cli.print(_("cli", "commands", "level_valid").format(levels=", ".join(_LEVEL_BY_NAME)))
+        ctx.cli.print_raw(_("cli", "commands", "level_valid").format(levels=", ".join(_LEVEL_BY_NAME)))
         return
     log.setLevel(_LEVEL_BY_NAME[name])
     ctx.cli.print(_("cli", "commands", "level_set").format(level=name))
@@ -735,4 +761,4 @@ async def _cmd_dump(ctx: CommandContext) -> None:
     cur = getattr(s._args, "dump", False)
     new = not cur if not ctx.args else ctx.args[0].lower() in ("1", "true", "on", "yes")
     s._args.dump = new
-    ctx.cli.print(_("cli", "commands", "dump_enabled") if new else _("cli", "commands", "dump_disabled"))
+    ctx.cli.print_raw(_("cli", "commands", "dump_enabled") if new else _("cli", "commands", "dump_disabled"))

@@ -408,7 +408,23 @@ class _CLIOutputHandler(logging.Handler):
 if _HAS_PROMPT_TOOLKIT:
 
     class _CLICompleter(Completer):
-        """Tab-completion for prompt_toolkit: yields matching command names."""
+        """Context-sensitive tab-completion: commands, args, game/channel names."""
+
+        _SUBCOMMANDS: dict[str, list[str]] = {
+            "priority": ["list", "add", "remove", "move", "clear"],
+            "exclude": ["list", "add", "remove", "clear"],
+        }
+        _STATIC_ARGS: dict[str, list[str]] = {
+            "mode": ["priority_only", "ending_soonest", "low_avbl_first"],
+            "quality": ["0", "1", "2"],
+            "level": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            "reload-interval": [],
+        }
+        _SETTING_KEYS: list[str] = [
+            "proxy", "language", "exclude", "priority", "priority_mode",
+            "connection_quality", "reload_interval", "tray_notifications",
+            "dark_mode", "autostart_tray",
+        ]
 
         def __init__(self, cli: "CLIManager") -> None:
             self._cli = cli
@@ -417,14 +433,104 @@ if _HAS_PROMPT_TOOLKIT:
             registry = getattr(self._cli, "_registry", None)
             if registry is None:
                 return
-            word = document.text_before_cursor.lstrip()
-            for cmd in registry.all():
-                if cmd.name.startswith(word):
-                    yield Completion(
-                        cmd.name,
-                        start_position=-len(word),
-                        display_meta=cmd.summary,
+            text = document.text_before_cursor.lstrip()
+            tokens = text.split()
+            word = document.get_word_before_cursor()
+            word_lower = word.lower()
+
+            if not tokens:
+                return
+
+            cmd = tokens[0].lower()
+
+            # First word: complete command names (only when no trailing space)
+            if len(tokens) == 1 and not text.endswith(" "):
+                for c in registry.all():
+                    if c.name.startswith(word_lower):
+                        yield Completion(
+                            c.name, start_position=-len(word),
+                            display_meta=c.summary,
+                        )
+                return
+
+            # Subcommand completion
+            if cmd in self._SUBCOMMANDS and len(tokens) <= 2:
+                for s in self._SUBCOMMANDS[cmd]:
+                    if s.startswith(word_lower):
+                        yield Completion(s, start_position=-len(word))
+                return
+
+            # Game name completion for priority/exclude add/remove
+            if cmd in ("priority", "exclude") and len(tokens) >= 2:
+                sub = tokens[1]
+                if sub == "add":
+                    games = self._collect_game_names()
+                    for g in sorted(games, key=str.lower):
+                        if g.lower().startswith(word_lower):
+                            yield Completion(g, start_position=-len(word))
+                elif sub == "remove":
+                    src = (
+                        list(self._cli._twitch.settings.priority) if cmd == "priority"
+                        else sorted(self._cli._twitch.settings.exclude)
                     )
+                    for g in src:
+                        if g.lower().startswith(word_lower):
+                            yield Completion(g, start_position=-len(word))
+                return
+
+            # Channel name completion for watch
+            if cmd == "watch":
+                for ch in self._cli.channels._channels.values():
+                    if ch._login.lower().startswith(word_lower):
+                        yield Completion(ch._login, start_position=-len(word),
+                                         display_meta=ch.name)
+                return
+
+            # Static argument completion
+            if cmd in self._STATIC_ARGS:
+                for val in self._STATIC_ARGS[cmd]:
+                    if val.lower().startswith(word_lower):
+                        yield Completion(val, start_position=-len(word))
+                return
+
+            # Lang completion
+            if cmd == "lang":
+                from constants import LANG_PATH
+                for f in sorted(LANG_PATH.glob("*.json")):
+                    code = f.stem
+                    if code.lower().startswith(word_lower):
+                        yield Completion(code, start_position=-len(word))
+                return
+
+            # help: complete command names
+            if cmd == "help":
+                for c in registry.all():
+                    if c.name.startswith(word_lower):
+                        yield Completion(c.name, start_position=-len(word),
+                                         display_meta=c.summary)
+                return
+
+            # set/get: complete setting keys
+            if cmd in ("set", "get"):
+                for k in self._SETTING_KEYS:
+                    if k.startswith(word_lower):
+                        yield Completion(k, start_position=-len(word))
+                return
+
+        def _collect_game_names(self) -> set[str]:
+            """Collect known game names from inventory, channels, and settings."""
+            names: set[str] = set()
+            t = self._cli._twitch
+            for camp in t.inventory:
+                names.add(camp.game.name)
+            for ch in self._cli.channels._channels.values():
+                if ch.game is not None:
+                    names.add(ch.game.name)
+            for g in t.settings.priority:
+                names.add(g)
+            for g in t.settings.exclude:
+                names.add(g)
+            return names
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +543,7 @@ class CLIManager:
         self._poll_task: asyncio.Task[NoReturn] | None = None
         self._shell_task: asyncio.Task[None] | None = None
         self._close_requested = asyncio.Event()
+        self._start_time = datetime.now()
         self._output_lines: list[str] = []
         self._max_output_lines = 500
         self._is_tty = sys.stdout.isatty()
@@ -588,6 +695,28 @@ class CLIManager:
             except Exception:
                 pass
 
+    def print_raw(self, message: str) -> None:
+        """Print without a timestamp — for informational / display output."""
+        self._output_lines.append(message)
+        if len(self._output_lines) > self._max_output_lines:
+            del self._output_lines[: -self._max_output_lines]
+        app = getattr(self, "_app", None)
+        buf: Buffer | None = getattr(self, "_log_buffer", None)
+        if app is not None and buf is not None and app.is_running:
+            buf.text = buf.text + message + "\n"
+            if getattr(self, "_log_follow", True):
+                buf.cursor_position = len(buf.text)
+            try:
+                app.invalidate()
+            except Exception:
+                pass
+        else:
+            try:
+                sys.stdout.write(message + "\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
+
     def set_games(self, games: set[Game]) -> None:
         self.settings.set_games(games)
 
@@ -653,8 +782,13 @@ class CLIManager:
 
         # Line 1: core status
         uid = f"({self.login.user_id})" if self.login.user_id else ""
+        now = datetime.now()
+        secs = int((now - self._start_time).total_seconds())
+        d, rest = divmod(secs, 86400)
+        h, m, s = rest // 3600, rest % 3600 // 60, rest % 60
+        uptime = f"Run: {d}:{h:02d}:{m:02d}:{s:02d}"
         parts = [
-            f"version: {__version__}",
+            f"Version: {__version__}",
             f"Engine: {state_name}",
             f"Login: {self.login.status}{uid}",
         ]
@@ -664,6 +798,8 @@ class CLIManager:
         parts.append(f"Ch: {len(twitch.channels)}")
         if ws_count:
             parts.append(f"WS: {ws_count}")
+        parts.append(f"Sys: {now.strftime('%H:%M:%S')}")
+        parts.append(uptime)
         line1 = " │ ".join(parts)
 
         # Line 2: drop progress (right-aligned)
@@ -717,12 +853,13 @@ class CLIManager:
             @kb.add("enter")
             def _submit(event):
                 text = input_buffer.text
-                # Manually feed the history — the custom key binding bypasses
-                # the Buffer's accept flow that would normally do this.
-                if input_buffer.history is not None:
-                    input_buffer.history.append_string(text)
                 input_buffer.reset()
                 if text.strip():
+                    # Manually feed the history — the custom key binding bypasses
+                    # the Buffer's accept flow that would normally do this.
+                    # Skip empty/whitespace input so they don't clutter history.
+                    if input_buffer.history is not None:
+                        input_buffer.history.append_string(text)
                     asyncio.ensure_future(self._dispatch_cmd(text))
 
             @kb.add("c-c")
@@ -811,11 +948,19 @@ class CLIManager:
             if self._output_lines:
                 log_buffer.text = "\n".join(self._output_lines) + "\n"
 
+            # First-run guide: show when no priority games configured.
+            if not self._twitch.settings.priority:
+                log_buffer.text += (
+                    "\n"
+                    + _("cli", "commands", "welcome")
+                    + "\n\n"
+                )
+
             # Periodic refresh keeps the status-line progress bars
             # alive even when no other print activity is happening.
             async def _refresh_tui() -> NoReturn:
                 while True:
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(1)
                     try:
                         app.invalidate()
                     except Exception:
