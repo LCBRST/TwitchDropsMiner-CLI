@@ -6,26 +6,9 @@
 > No tkinter, no system tray — runs wherever Python runs (servers, containers,  
 > WSL, headless boxes), controlled via an interactive command shell.
 
-After startup you’ll see the prompt `tdm[idle]>`.  
-Type `help` to list all available commands.
+## Preview
+<img width="1193" height="488" alt="en" src="https://github.com/user-attachments/assets/92cbb793-d4b4-4d66-843c-d589a6725260" />
 
-```
-$ python main.py
-[09:38:00] 
-[09:38:00]   TwitchDropsMiner release-26.06.0401 (CLI)
-[09:38:00] 
-[09:38:01] [login] Logging in...
-[09:38:02] 
-[09:38:02] Twitch login required (Device Code flow)
-[09:38:02]   1. Open: https://www.twitch.tv/activate?device-code=ABCDEFGH
-[09:38:02]   2. Enter the code: ABCDEFGH
-[09:38:02]   3. Approve the login in your browser, then come back.
-[09:38:02] 
-tdm[idle]> priority add "Escape from Tarkov"
-tdm[idle]> mode priority_only
-tdm[idle]> resume
-tdm[active]> status
-```
 
 ---
 
