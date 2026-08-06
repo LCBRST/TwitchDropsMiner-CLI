@@ -4,25 +4,9 @@
 > 不依赖 tkinter，不依赖系统托盘——只要能跑 Python 就能用（服务器、容器、
 > WSL、无显示器的盒子），通过交互式命令 shell 控制所有功能。
 
-启动后会进入提示符 `tdm[idle]>`，输入 `help` 查看所有命令。
+## 预览
+<img width="1172" height="481" alt="cn" src="https://github.com/user-attachments/assets/313e42e6-f1d0-4496-9ebd-8e554c8cdc41" />
 
-```
-$ python main.py
-[09:38:00] ============================================================
-[09:38:00]   TwitchDropsMiner release-26.06.0401 (CLI)
-[09:38:00] ============================================================
-[09:38:01] [login] Logging in...
-[09:38:02] ============================================================
-[09:38:02] Twitch login required (Device Code flow)
-[09:38:02]   1. Open: https://www.twitch.tv/activate?device-code=ABCDEFGH
-[09:38:02]   2. Enter the code: ABCDEFGH
-[09:38:02]   3. Approve the login in your browser, then come back.
-[09:38:02] ============================================================
-tdm[idle]> priority add "Escape from Tarkov"
-tdm[idle]> mode priority_only
-tdm[idle]> resume
-tdm[active]> status
-```
 
 ---
 
