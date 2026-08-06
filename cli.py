@@ -156,17 +156,33 @@ class _CLIProgress:
     def __init__(self, cli: CLIManager) -> None:
         self._cli = cli
         self.current: TimedDrop | None = None
+        self._last_tick: float = 0.0   # last time a minute tick was observed
+        self._gql_checked: float = 0.0  # last time the GQL fallback was checked
 
     def stop_timer(self) -> None:
-        pass
+        self._last_tick = 0.0
 
     def start_timer(self) -> None:
-        pass
+        from time import time
+        self._last_tick = time()
 
     def minute_almost_done(self) -> bool:
-        # The engine has a GQL fallback path that handles this gracefully.
-        # Returning False is conservative; the real GUI tracks per-second
-        # ticks which we don't have in CLI mode.
+        # In CLI mode there are no per-second GUI ticks, so approximate:
+        # signal "minute almost done" when ~55 s have passed since the
+        # last progress tick OR since the last GQL fallback check.  This
+        # lets _watch_loop trigger the GQL / bump_minutes fallback paths
+        # so drop progress keeps advancing even when the WebSocket
+        # delivers few (or no) drop-progress events.
+        if self.current is None:
+            return False
+        from time import time
+        now = time()
+        # Only fire at most once per ~55 s to avoid hammering GQL.
+        if now - self._gql_checked < 55:
+            return False
+        if now - self._last_tick >= 55:
+            self._gql_checked = now
+            return True
         return False
 
     def display(
@@ -176,12 +192,17 @@ class _CLIProgress:
         countdown: bool = True,
         subone: bool = False,
     ) -> None:
+        from time import time
         prev = self.current
         self.current = drop
         if drop is None:
             if prev is not None:
                 self._cli.print(_("cli", "drop", "cleared"))
             return
+        # Record a progress tick so minute_almost_done can fire correctly.
+        # A subone pre-display isn't a real progress event, so skip it.
+        if not subone:
+            self._last_tick = time()
         # Avoid spamming when the same drop just gets a per-minute tick
         if prev is None or prev.id != drop.id:
             campaign = drop.campaign
@@ -775,8 +796,15 @@ class CLIManager:
         """Persistent top status bar: engine state, login, watching, counts, progress."""
         from version import __version__
         twitch = self._twitch
-        state_name = twitch._state.name if hasattr(twitch, "_state") else "?"
+        raw_state = twitch._state.name if hasattr(twitch, "_state") else "?"
         watching = self.channels._watching
+        # Map internal state to a user-visible label.
+        # CHANNEL_SWITCH is the steady "watching" state — once a channel
+        # is being watched, show WATCHING instead of the internal enum name.
+        if raw_state == "CHANNEL_SWITCH" and watching is not None:
+            state_name = "WATCHING"
+        else:
+            state_name = raw_state
         drop = self.progress.current
         ws_count = len(self.websockets.entries)
 

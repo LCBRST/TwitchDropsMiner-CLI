@@ -888,7 +888,10 @@ class Twitch:
             channel: Channel = await self.watching_channel.get()
             if not channel.online:
                 # if the channel isn't online anymore, we stop watching it
-                self.stop_watching()
+                # but only if the state machine hasn't already switched to another
+                current = self.watching_channel.get_with_default(None)
+                if current is channel or current is None:
+                    self.stop_watching()
                 continue
             # logger.log(CALL, f"Sending watch payload to: {channel.name}")
             succeeded: bool = await channel.send_watch()
