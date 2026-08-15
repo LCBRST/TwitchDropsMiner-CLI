@@ -48,6 +48,7 @@ core_targets=(
     "lock.file"
     "dump.dat"
     "log.txt"
+    "log"
     ".mypy_cache"
 )
 

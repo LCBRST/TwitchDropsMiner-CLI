@@ -100,12 +100,22 @@ python main.py --no-shell # 守护模式，无提示符，只有日志
 | --- | --- |
 | `--version` | 显示版本并退出 |
 | `-v` / `-vv` / `-vvv` / `-vvvv` | 提高日志级别 |
-| `--log` | 同时把日志写到 `log.txt` |
+| `--log` | （兼容保留）日志现在默认写入 `log/<时间戳>.log`，无需此参数 |
 | `--dump` | 把每个 GQL 响应 dump 到 `dump.dat` |
 | `--no-shell` | 不启动交互式提示符（后台模式） |
+| `--no-watchdog` | 关闭崩溃自动重启（默认开启看门狗） |
 | `--token <文件>` | 用文件里的 OAuth token 预填 `cookies.jar` |
 | `--debug-ws` | （调试）WebSocket 帧打到 DEBUG |
 | `--debug-gql` | （调试）GQL 请求打到 DEBUG |
+
+### 崩溃自动重启（看门狗）
+
+默认开启：程序启动时会拉起一个轻量看门狗父进程来监督真正干活的子进程，
+子进程一旦崩溃（包括被 OOM / `kill -9` 直接杀死）会自动重启。每次重启都会在
+`log/restart.log` 里记一行。正常退出（`exit` 命令 / Ctrl+C）不会重启。
+
+- 关掉它：加 `--no-watchdog`（例如你自己用 systemd 等外部守护时）。
+- 停止整个程序：Ctrl+C，或杀掉看门狗父进程（`pkill -f TwitchDropsMiner`）。
 
 环境变量 `TDM_GUI=1` → 切回原版 GUI。
 
@@ -194,7 +204,7 @@ python main.py --no-shell # 守护模式，无提示符，只有日志
 | `settings.json` | 持久化设置（priority、exclude、mode、proxy、lang、quality 等） |
 | `cookies.jar` | 持久化登录。请像对待密码一样对待这个文件——拿到它的人就能用你的 Twitch 账号 |
 | `lock.file` | 单实例锁。崩溃后会留下，可手动删 |
-| `log.txt` | 加 `--log` 才会创建 |
+| `log/` | 自动生成：时间戳命名的日志（`YYYY-MM-DD_HH-MM-SS.log`，轮转）+ 命令历史 `history` |
 | `cache/` | GUI 模式才用的图片缓存，CLI 模式不创建 |
 
 ## 架构

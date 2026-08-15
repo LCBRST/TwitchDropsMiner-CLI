@@ -109,12 +109,23 @@ python main.py --no-shell     # daemon mode
 |--------|------------|
 | `--version` | Show version |
 | `-v` … `-vvvv` | Increase log verbosity |
-| `--log` | Write logs to `log.txt` |
+| `--log` | (kept for compatibility) logs are now written to `log/<timestamp>.log` by default |
 | `--dump` | Dump GQL responses |
 | `--no-shell` | Background mode |
+| `--no-watchdog` | Disable the crash auto-restart supervisor |
 | `--token <file>` | Pre‑seed login token |
 | `--debug-ws` | Debug WebSocket frames |
 | `--debug-gql` | Debug GQL requests |
+
+### Crash auto-restart (watchdog)
+
+Enabled by default: the program spawns a lightweight watchdog parent that
+supervises the real worker, restarting it whenever it dies — including OOM /
+`kill -9`. Each restart is logged to `log/restart.log`. A clean exit
+(`exit` command / Ctrl+C) does not restart.
+
+- Disable it with `--no-watchdog` (e.g. when you run it under your own supervisor).
+- To stop everything: Ctrl+C, or kill the watchdog parent (`pkill -f TwitchDropsMiner`).
 
 ---
 
@@ -193,7 +204,7 @@ python main.py --no-shell     # daemon mode
 | `settings.json` | Persistent settings |
 | `cookies.jar` | Login token (**keep secret**) |
 | `lock.file` | Single‑instance lock |
-| `log.txt` | Logs |
+| `log/` | Auto-created: timestamped logs (`YYYY-MM-DD_HH-MM-SS.log`, rotating) + command history `history` |
 | `cache/` | GUI cache (unused in CLI) |
 
 ---

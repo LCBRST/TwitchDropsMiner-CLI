@@ -1485,6 +1485,7 @@ class Twitch:
         campaigns.sort(key=lambda c: c.eligible, reverse=True)
 
         self._drops.clear()
+        self._campaigns.clear()
         self.gui.inv.clear()
         self.inventory.clear()
         self._mnt_triggers.clear()

@@ -100,7 +100,8 @@ SCRIPTS_PATH = Path(VENV_PATH, SYS_SCRIPTS)
 # NOTE: These don't have to be available to the end-user, so the path points to the internal dir
 LANG_PATH = _resource_path("lang")
 # Other Paths
-LOG_PATH = Path(WORKING_DIR, "log.txt")
+LOG_DIR = Path(WORKING_DIR, "log")
+HISTORY_PATH = Path(LOG_DIR, "history")
 DUMP_PATH = Path(WORKING_DIR, "dump.dat")
 LOCK_PATH = Path(WORKING_DIR, "lock.file")
 CACHE_PATH = Path(WORKING_DIR, "cache")

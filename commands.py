@@ -753,6 +753,10 @@ async def _cmd_level(ctx: CommandContext) -> None:
         ctx.cli.print_raw(_("cli", "commands", "level_valid").format(levels=", ".join(_LEVEL_BY_NAME)))
         return
     log.setLevel(_LEVEL_BY_NAME[name])
+    # keep the console handler in sync so runtime level changes still affect output
+    handler = getattr(ctx.cli, "_handler", None)
+    if handler is not None:
+        handler.setLevel(_LEVEL_BY_NAME[name])
     ctx.cli.print(_("cli", "commands", "level_set").format(level=name))
 
 

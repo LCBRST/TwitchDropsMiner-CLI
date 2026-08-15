@@ -31,14 +31,13 @@ import asyncio
 import logging
 from collections import abc
 from datetime import datetime
-from pathlib import Path
 from typing import Any, NoReturn, TypeVar, TYPE_CHECKING
 
 from yarl import URL
 
 from exceptions import ExitRequest
 from translate import _
-from constants import OUTPUT_FORMATTER, WORKING_DIR
+from constants import OUTPUT_FORMATTER, LOG_DIR, HISTORY_PATH
 
 # Use prompt_toolkit for a fullscreen TUI shell: scrollable log area,
 # command history, line-editing, tab completion, and mouse-wheel support.
@@ -72,7 +71,7 @@ except ImportError:
             readline = None  # type: ignore[assignment]
             _HAS_READLINE = False
 
-_HISTORY_PATH = Path(WORKING_DIR, ".cli_history")
+_HISTORY_PATH = HISTORY_PATH
 _HISTORY_LENGTH = 1000
 
 if TYPE_CHECKING:
@@ -580,8 +579,10 @@ class CLIManager:
         self.settings = _CLISettingsStub(self)
 
         # Logging handler
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
         self._handler = _CLIOutputHandler(self)
         self._handler.setFormatter(OUTPUT_FORMATTER)
+        self._handler.setLevel(self._twitch.settings.logging_level)
         logging.getLogger("TwitchDrops").addHandler(self._handler)
 
         # Banner
@@ -691,6 +692,18 @@ class CLIManager:
             except Exception:
                 pass
 
+    _MAX_LOG_LINES: int = 5000
+
+    def _append_log_buffer(self, buf: Any, line: str) -> None:
+        """Append a line to the TUI log buffer, trimming oldest lines to bound memory."""
+        n = getattr(self, "_log_buffer_lines", 0) + 1
+        self._log_buffer_lines = n
+        buf.text = buf.text + line + "\n"
+        if n > self._MAX_LOG_LINES:
+            keep = buf.text.splitlines(True)[-(self._MAX_LOG_LINES // 2):]
+            buf.text = "".join(keep)
+            self._log_buffer_lines = len(keep)
+
     def print(self, message: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
         line = f"[{ts}] {message}"
@@ -702,7 +715,7 @@ class CLIManager:
         app = getattr(self, "_app", None)
         buf: Buffer | None = getattr(self, "_log_buffer", None)
         if app is not None and buf is not None and app.is_running:
-            buf.text = buf.text + line + "\n"
+            self._append_log_buffer(buf, line)
             if getattr(self, "_log_follow", True):
                 buf.cursor_position = len(buf.text)
             try:
@@ -724,7 +737,7 @@ class CLIManager:
         app = getattr(self, "_app", None)
         buf: Buffer | None = getattr(self, "_log_buffer", None)
         if app is not None and buf is not None and app.is_running:
-            buf.text = buf.text + message + "\n"
+            self._append_log_buffer(buf, message)
             if getattr(self, "_log_follow", True):
                 buf.cursor_position = len(buf.text)
             try:
