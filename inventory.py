@@ -427,13 +427,17 @@ class DropsCampaign:
 
     @property
     def progress(self) -> float:
-        total_required = sum(d.required_minutes for d in self.drops)
-        if total_required <= 0:
+        # Total progress = earned minutes / final cumulative target. Use the
+        # campaign-level cumulative required/remaining (max over the drop
+        # chain), not a sum of each drop's own cumulative values — the sum
+        # double-counts claimed drops and picks the wrong denominator.
+        required = self.required_minutes
+        current = required - self.remaining_minutes
+        if current <= 0 or required <= 0:
             return 0.0
-        total_current = sum(d.current_minutes for d in self.drops)
-        if total_current >= total_required:
+        elif current >= required:
             return 1.0
-        return total_current / total_required
+        return current / required
 
     @property
     def availability(self) -> float:

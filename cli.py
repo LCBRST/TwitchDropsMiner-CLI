@@ -157,6 +157,7 @@ class _CLIProgress:
         self.current: TimedDrop | None = None
         self._last_tick: float = 0.0   # last time a minute tick was observed
         self._gql_checked: float = 0.0  # last time the GQL fallback was checked
+        self._reported_ids: set[str] = set()  # drop IDs we already announced
 
     def stop_timer(self) -> None:
         self._last_tick = 0.0
@@ -202,8 +203,12 @@ class _CLIProgress:
         # A subone pre-display isn't a real progress event, so skip it.
         if not subone:
             self._last_tick = time()
-        # Avoid spamming when the same drop just gets a per-minute tick
-        if prev is None or prev.id != drop.id:
+        # Report each drop at most once per session. A per-minute progress tick
+        # must not re-print the full "now mining" banner. Key the dedup on the
+        # drop's ID rather than `prev`, so a stop_watching/re-watch cycle (which
+        # resets `self.current`) can't make the same drop flood the terminal.
+        if drop.id not in self._reported_ids:
+            self._reported_ids.add(drop.id)
             campaign = drop.campaign
             bar_w = 20
             c_bar = self._cli._render_bar(campaign.progress, bar_w)
@@ -898,9 +903,13 @@ class CLIManager:
                 if text.strip():
                     # Manually feed the history — the custom key binding bypasses
                     # the Buffer's accept flow that would normally do this.
-                    # Skip empty/whitespace input so they don't clutter history.
-                    if input_buffer.history is not None:
-                        input_buffer.history.append_string(text)
+                    # Skip empty/whitespace input and consecutive duplicates so
+                    # scrolling back isn't cluttered with repeated commands.
+                    hist = input_buffer.history
+                    if hist is not None:
+                        last = next(iter(hist.load_history_strings()), None)
+                        if last != text:
+                            hist.append_string(text)
                     asyncio.ensure_future(self._dispatch_cmd(text))
 
             @kb.add("c-c")
@@ -1079,6 +1088,12 @@ class CLIManager:
                 if not raw_line:
                     self._redraw_prompt()
                     continue
+                # readline auto-appends the raw line to its history; drop it
+                # when it duplicates the previous entry.
+                if _HAS_READLINE:
+                    length = readline.get_current_history_length()
+                    if length >= 2 and readline.get_history_item(length - 1).strip() == raw_line:
+                        readline.remove_history_item(length)
                 try:
                     self.print("─" * 56)
                     await self._registry.dispatch(raw_line)
