@@ -637,7 +637,7 @@ class Twitch:
                 self.gui.tray.change_icon("maint")
                 # ensure the websocket is running
                 await self.websocket.start()
-                await self.fetch_inventory()
+                await self._fetch_inventory_retry()
                 self.gui.set_games(set(campaign.game for campaign in self.inventory))
                 # Save state on every inventory fetch
                 self.save()
@@ -1352,6 +1352,7 @@ class Twitch:
                                     "service timeout",
                                     "service unavailable",
                                     "context deadline exceeded",
+                                    "request cancelled",
                                 )
                             ):
                                 force_retry = True
@@ -1532,6 +1533,43 @@ class Twitch:
         if self._mnt_task is not None and not self._mnt_task.done():
             self._mnt_task.cancel()
         self._mnt_task = asyncio.create_task(self._maintenance_task())
+
+    async def _fetch_inventory_retry(self) -> None:
+        """
+        Fetch the drops inventory, retrying a few times on transient failures.
+
+        Twitch's GQL backend periodically restarts (the "request cancelled" /
+        "service unavailable" errors that show up during their maintenance
+        windows), so a single failed inventory fetch shouldn't take the whole
+        miner down. Control-flow exceptions (exit/reload) propagate immediately.
+        """
+        backoff = ExponentialBackoff(maximum=60)
+        for delay in backoff:
+            try:
+                await self.fetch_inventory()
+                return
+            except (ExitRequest, ReloadRequest):
+                raise
+            except (
+                GQLException,
+                aiohttp.ClientConnectionError,
+                asyncio.TimeoutError,
+                aiohttp.ClientPayloadError,
+                aiohttp.ContentTypeError,
+            ) as exc:
+                if backoff.steps >= 8:
+                    raise
+                logger.warning(
+                    f"Inventory fetch failed ({type(exc).__name__}: {exc}), "
+                    f"retrying in {round(delay)}s"
+                )
+                self.print(
+                    _("error", "no_connection").format(
+                        seconds=round(delay), url="https://gql.twitch.tv/gql"
+                    )
+                )
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self.gui.wait_until_closed(), timeout=delay)
 
     def get_active_campaign(self, channel: Channel | None = None) -> DropsCampaign | None:
         if not self.wanted_games:
