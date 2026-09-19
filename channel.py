@@ -248,7 +248,11 @@ class Channel:
 
     @property
     def url(self) -> URLType:
-        return URLType(f"{self._twitch._client_type.CLIENT_URL}/{self._login}")
+        # NOTE: this is the channel's web page, shown as a link in the UI and fetched to
+        # extract the spade URL from. It must not be derived from the client type - the
+        # pages served to the app-based clients neither link to settings.js (where the
+        # spade URL lives), nor are they guaranteed to be reachable.
+        return URLType(f"https://www.twitch.tv/{self._login}")
 
     @property
     def iid(self) -> str:

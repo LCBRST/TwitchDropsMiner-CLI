@@ -250,6 +250,14 @@ class ClientType:
     )
 
 
+# Client type used for all of the app's Twitch traffic, the device code login flow
+# included. Twitch tends to silently disable the device code flow for individual
+# client IDs (ANDROID_APP broke in September 2026, failing the login with an
+# "invalid client" error) - if logging in stops working, point this at another
+# entry of `ClientType` that still allows it.
+CLIENT_TYPE = ClientType.SMARTBOX
+
+
 class State(Enum):
     IDLE = auto()
     INVENTORY_FETCH = auto()

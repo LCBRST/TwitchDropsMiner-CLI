@@ -173,7 +173,7 @@ if __name__ == "__main__":
         sys.exit(4)
 
     def _seed_token(token_path: str) -> None:
-        from constants import COOKIES_PATH, ClientType
+        from constants import COOKIES_PATH, CLIENT_TYPE
         with open(token_path, "r", encoding="utf8") as fh:
             token = fh.read().strip()
         if not token:
@@ -182,7 +182,7 @@ if __name__ == "__main__":
             return
         import aiohttp
         jar = aiohttp.CookieJar()
-        jar.update_cookies({"auth-token": token}, ClientType.ANDROID_APP.CLIENT_URL)
+        jar.update_cookies({"auth-token": token}, CLIENT_TYPE.CLIENT_URL)
         jar.save(COOKIES_PATH)
 
     async def main() -> int:

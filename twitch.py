@@ -49,7 +49,7 @@ from constants import (
     GQL_QUERIES,
     WATCH_INTERVAL,
     State,
-    ClientType,
+    CLIENT_TYPE,
     PriorityMode,
     WebsocketTopic,
 )
@@ -125,6 +125,7 @@ class _AuthState:
             "client_id": client_info.CLIENT_ID,
             "scopes": "",  # no scopes needed
         }
+        backoff = ExponentialBackoff(maximum=5 * 60)
         while True:
             try:
                 now = datetime.now(timezone.utc)
@@ -138,6 +139,28 @@ class _AuthState:
                     #     "user_code": "8 chars [A-Z]",
                     #     "verification_uri": "https://www.twitch.tv/activate?device-code=ABCDEFGH"
                     # }
+                    if response.status != 200:
+                        # No device code to work with, so there's nothing to continue on.
+                        # Twitch explains itself in the body - report that, instead of dying
+                        # with a KeyError that says nothing about the actual problem.
+                        message = "no reason given"
+                        with suppress(ValueError):
+                            message = (await response.json()).get("message") or message
+                        if response.status == 429:
+                            # too many device code requests - wait it out and request another
+                            delay = next(backoff)
+                            self._twitch.print(
+                                f"Device code request rejected ({message}),"
+                                f" retrying in {delay:.0f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        raise LoginException(
+                            f"Unable to obtain a device code ({message}) - the client type"
+                            " this app is using is most likely no longer allowed to log in"
+                            " this way. Switch CLIENT_TYPE in constants.py over to another"
+                            " entry of ClientType and try again."
+                        )
                     response_json: JsonType = await response.json()
                     device_code: str = response_json["device_code"]
                     user_code: str = response_json["user_code"]
@@ -434,7 +457,7 @@ class Twitch:
         # Do not modify the default, safe values.
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
         # Client type, session and auth
-        self._client_type: ClientInfo = ClientType.ANDROID_APP
+        self._client_type: ClientInfo = CLIENT_TYPE
         self._session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
         if os.environ.get("TDM_GUI") == "1":
