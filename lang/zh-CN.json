@@ -57,6 +57,7 @@
             "helper_reachable_alt": "或：{address}",
             "helper_multi_hint": "有多个地址，用助手那边能连通的那个；都不通就检查防火墙",
             "helper_started": "登录助手已开启 —— 执行 `helper` 看该用哪个地址",
+            "helper_autoclosed": "会话已导入，登录助手端点已自动关闭 —— 需要时用 `helper on` 重新开启",
             "welcome": "欢迎！这似乎是您第一次使用本工具。\n快速入门：\n  1. priority add <游戏名>  — 将游戏添加到优先列表\n  2. mode priority_only      — 仅挖掘优先列表中的游戏\n  3. resume                 — 开始挖掘掉宝\n  输入 'help' 查看所有可用命令。",
             "help_header": "命令列表 (输入 'help <命令>' 查看详情):",
             "unknown": "未知命令: {name} (输入 'help' 查看帮助)",

@@ -57,6 +57,7 @@
             "helper_reachable_alt": "或：{address}",
             "helper_multi_hint": "有多個位址，用助手那邊能連通的那個；都不通就檢查防火牆",
             "helper_started": "登入助手已開啟 —— 執行 `helper` 看該用哪個位址",
+            "helper_autoclosed": "工作階段已匯入，登入助手端點已自動關閉 —— 需要時用 `helper on` 重新開啟",
             "welcome": "歡迎！這似乎是您第一次使用本工具。\n快速入門：\n  1. priority add <遊戲名>  — 將遊戲新增到優先列表\n  2. mode priority_only      — 僅挖掘優先列表中的遊戲\n  3. resume                 — 開始挖掘掉寶\n  輸入 'help' 檢視所有可用指令。",
             "help_header": "指令列表 (輸入 'help <指令>' 檢視詳情):",
             "unknown": "未知指令: {name} (輸入 'help' 檢視說明)",

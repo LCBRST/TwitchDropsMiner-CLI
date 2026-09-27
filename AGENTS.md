@@ -345,8 +345,10 @@ command shows the same reasons translated into the user's language.
   SSH into the miner — it must drive the desktop's own Chrome.
 - **Do not watch streams with the same Twitch account while mining.** Progress is
   counted per account and the two interfere.
-- **`helper server enabled` left on is a standing risk.** Turn it back off with
-  `helper off` once the session is in.
+- **The endpoint is a standing risk while it is open**, so it closes itself once a
+  session is accepted (after a short grace period, so a helper whose
+  acknowledgement was lost can still read its receipt). A later helper run needs
+  `helper on` again - do not be surprised by `SESSION_HELPER_DISABLED` then.
 
 ## Reference
 

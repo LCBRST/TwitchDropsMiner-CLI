@@ -679,6 +679,8 @@ class Twitch:
         self._helper_server: HelperServer | None = None
         # Keeps the imported session's integrity proof alive; started per run.
         self._renewal: SessionRenewal | None = None
+        # Deferred shutdown of the helper endpoint after a session is imported.
+        self._helper_close_task: asyncio.Task | None = None
         if os.environ.get("TDM_GUI") == "1":
             raise ImportError("GUI is not available — install the upstream release.")
         from cli import CLIManager
@@ -836,6 +838,34 @@ class Twitch:
         if self._renewal is not None:
             # A newly imported session replaces whatever was being renewed.
             self._renewal.notify_changed()
+        self._close_helper_endpoint()
+
+    # How long the endpoint keeps answering after a session is in, so a helper
+    # whose acknowledgement was lost can still read the receipt. Its retry loop
+    # runs for up to a minute.
+    HELPER_GRACE = 90.0
+
+    def _close_helper_endpoint(self) -> None:
+        """
+        Turn the endpoint off now that it has done its job.
+
+        It accepts credentials from anyone who can reach it, and nothing needs it
+        afterwards: renewal reads the stored session, not this. The setting is
+        saved immediately so a restart cannot reopen it, but the server itself is
+        stopped from a separate task - shutting a server down from inside one of
+        its own handlers would wait on itself.
+        """
+        if not self.settings.helper_server_enabled:
+            return
+        self.settings.helper_server_enabled = False
+        self.settings.save()
+
+        async def close_later() -> None:
+            await asyncio.sleep(self.HELPER_GRACE)
+            await self.apply_helper_settings()
+            self.print(_("cli", "commands", "helper_autoclosed"))
+
+        self._helper_close_task = asyncio.create_task(close_later())
 
     def _on_session_renewed(self, user_id: int) -> None:
         self._adopt_imported(user_id, "Renewed the imported session")
@@ -936,6 +966,9 @@ class Twitch:
     async def shutdown(self) -> None:
         start_time = time()
         self.stop_watching()
+        if self._helper_close_task is not None:
+            self._helper_close_task.cancel()
+            self._helper_close_task = None
         if self._renewal is not None:
             await self._renewal.stop()
             self._renewal = None

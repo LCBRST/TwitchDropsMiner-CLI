@@ -158,6 +158,12 @@ helper
 should now show `imported session: active, expires ...`, and the miner's campaign
 count should jump to the full catalogue. It takes effect immediately — no restart.
 
+The endpoint then **closes itself** and prints a line saying so. It accepts
+credentials from anyone who can reach it, and nothing needs it once the session
+is in — renewal works from the stored session. That means a *later* helper run
+needs `helper on` again first; a session imported once lasts until renewal cannot
+keep up with it.
+
 ## Keeping the login alive
 
 The imported session carries an integrity proof that expires after about 16

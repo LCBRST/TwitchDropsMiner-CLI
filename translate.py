@@ -428,6 +428,7 @@ default_cli_translation: CLIMessages = {
         "helper_not_listening": "not listening (turn it on with `helper on`)",
         "helper_bind_failed": "could not open the port - see the log",
         "helper_started": "login helper endpoint opened - run `helper` to see which address to use",
+        "helper_autoclosed": "the session is in, so the login helper endpoint closed itself - `helper on` reopens it",
         "helper_session_none": "imported session: none",
         "helper_session_active": "imported session: active, expires {expires}",
         "helper_session_path": "stored at: {path}",
