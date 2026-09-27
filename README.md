@@ -1,275 +1,155 @@
-# TwitchDropsMiner CLI (English)
+# TwitchDropsMiner CLI
 
-> 📖 **中文说明 / Chinese documentation:** [**README_zh.md**](README_zh.md)
+> 📖 [中文说明](README_zh.md) · 🚀 **[入门指南 / Getting started](docs/getting-started.md)**
 
-> A headless, pure‑CLI fork of [DevilXD/TwitchDropsMiner](https://github.com/DevilXD/TwitchDropsMiner).  
-> No tkinter, no system tray — runs wherever Python runs (servers, containers,  
-> WSL, headless boxes), controlled via an interactive command shell.
+A headless, pure-CLI fork of [DevilXD/TwitchDropsMiner](https://github.com/DevilXD/TwitchDropsMiner).
+No tkinter, no tray — runs wherever Python runs, controlled from an interactive
+shell.
 
-## Preview
-<img width="1193" height="488" alt="en" src="https://github.com/user-attachments/assets/92cbb793-d4b4-4d66-843c-d589a6725260" />
+<img width="1193" height="488" alt="TwitchDropsMiner CLI" src="https://github.com/user-attachments/assets/92cbb793-d4b4-4d66-843c-d589a6725260" />
 
+## What it is
 
----
+The upstream app mines timed Twitch drops by imitating "still watching" heartbeats
+at the GraphQL layer — **no video or audio is downloaded at all**. It works well,
+but its GUI makes it awkward on a VPS, in Docker, over SSH, or on a Pi.
 
-## What this is
+This fork keeps the entire mining engine untouched and replaces the interface
+layer with a CLI manager (`cli.py`) and a command shell (`commands.py`).
+`gui.py` is still there: set `TDM_GUI=1` to go back to the upstream UI.
 
-The original TwitchDropsMiner is a desktop application (tkinter GUI + system tray)  
-that AFK‑mines Twitch drops by faking “watching” heartbeats at the GraphQL layer —  
-**without downloading any video or audio streams**.
-
-It works well, but the GUI makes it hard to use on:
-
-- headless servers
-- Docker containers
-- WSL / Raspberry Pi
-- SSH‑only environments
-- pure‑terminal workflows
-
-This branch keeps the **entire mining engine** intact  
-(GQL pipeline, WebSocket sharding, drop tracking, automatic channel switching),  
-and replaces the GUI layer with:
-
-- **CLI manager** (`cli.py`) — implements the same interface the engine expects
-- **Interactive command shell** (`commands.py`) — control everything by typing
-- **Minimal entry point** (`main.py`) — no Tk, no popups, no tray icon
-
-The original `gui.py` is **completely untouched**.  
-Set `TDM_GUI=1` to switch back to the upstream tkinter GUI at any time.
-
----
-
-## Why this exists
-
-- **Headless‑first** — runs on VPS / Docker / WSL / Pi
-- **Scriptable** — use `--no-shell` for cron jobs or background daemons
-- **Observable** — every state change prints one clean log line
-- **Upstream‑friendly** — engine code is unmodified
-
----
+- **Headless first** — servers, containers, WSL, Raspberry Pi
+- **Scriptable** — `--no-shell` for a service or cron
+- **Observable** — one clean log line per state change; `log` to read them back
+- **Upstream-friendly** — engine code is unmodified
 
 ## Features
 
-### Inherited from upstream
+From upstream: zero-bandwidth mining, game priority and exclusion lists, sharded
+websockets (~199 channels), automatic campaign discovery, auto channel switching,
+persistent login, auto-claiming, auto start/stop.
 
-- Zero‑bandwidth mining (no video/audio downloaded)
-- Game priority & exclusion lists
-- Sharded WebSocket connections (~199 channels)
-- Automatic campaign discovery
-- Stream tag & drop campaign validation
-- Auto‑switch channels
-- Persistent login via `cookies.jar`
-- Auto‑claim completed drops
-- Auto start/stop on campaign changes
+Added here: an interactive shell with live settings, `pause` / `resume` /
+`reload`, manual channel selection, pipe-friendly output, and a **browser login
+helper** that restores the full campaign catalogue plus automatic session renewal.
 
-### Added in this fork
+## Install
 
-- **OAuth Device Code login**
-- **Interactive command shell**
-- **Live configuration changes**
-- **`reload` / `pause` / `resume`**
-- **Manual channel selection**
-- **Pipe‑friendly output**
+**Prebuilt** — from [Releases](https://github.com/LCBRST/TwitchDropsMiner-CLI/releases).
+There are two builds, `TwitchDropsMiner-CLI_Linux` and
+`TwitchDropsMiner-CLI_Windows.exe`; macOS has no prebuilt, use the source install.
 
----
-
-## Installation & Running
-
-### Using prebuilt binaries
-1.Download bin file at release
-
+```bash
+chmod +x ./TwitchDropsMiner-CLI_Linux && ./TwitchDropsMiner-CLI_Linux   # Linux
 ```
-chmod +x ./twitch-drops-miner-cli
-./twitch-drops-miner-cli
+```powershell
+.\TwitchDropsMiner-CLI_Windows.exe                                     # Windows
 ```
 
-### Manual installation
+**From source** — Python 3.10+, any of Linux / macOS / Windows:
 
-```
+```bash
 git clone https://github.com/LCBRST/TwitchDropsMiner-CLI.git
 cd TwitchDropsMiner-CLI
 python3 -m venv venv
-venv/bin/pip install -U pip wheel
+venv/bin/pip install -U pip wheel          # Windows: venv\Scripts\pip
 venv/bin/pip install -r requirements.txt
+python main.py
 ```
 
+## Run
 
-## Running
+```bash
+python main.py              # interactive shell
+python main.py --no-shell   # no prompt, logs only
+```
+
+With no saved session it walks you through a one-time device code login and
+stores the token in `cookies.jar`. Then:
 
 ```
-python main.py                # interactive shell
-python main.py --no-shell     # daemon mode
+priority add <game>     # what you want to mine
+resume                  # start
 ```
 
----
+### If no campaigns show up
 
-## CLI arguments
+Twitch only lets some login types see the campaign catalogue, and the ones this
+program can mint for itself no longer qualify. A small **login helper**, run once
+on a machine with Chrome, hands over a session that can — and the miner renews it
+by itself from then on.
 
-| Argument | Description |
-|--------|------------|
-| `--version` | Show version |
-| `-v` … `-vvvv` | Increase log verbosity |
-| `--log` | (kept for compatibility) logs are now written to `log/<timestamp>.log` by default |
-| `--dump` | Dump GQL responses |
-| `--no-shell` | Background mode |
-| `--no-watchdog` | Disable the crash auto-restart supervisor |
-| `--token <file>` | Pre‑seed login token |
-| `--debug-ws` | Debug WebSocket frames |
-| `--debug-gql` | Debug GQL requests |
+```
+helper on     # then run tdm-login-helper on the desktop, against the address shown
+helper        # shows the imported session and renewal state
+helper renew  # force a renewal now instead of waiting for the deadline
+```
 
-### Crash auto-restart (watchdog)
-
-Enabled by default: the program spawns a lightweight watchdog parent that
-supervises the real worker, restarting it whenever it dies — including OOM /
-`kill -9`. Each restart is logged to `log/restart.log`. A clean exit
-(`exit` command / Ctrl+C) does not restart.
-
-- Disable it with `--no-watchdog` (e.g. when you run it under your own supervisor).
-- To stop everything: Ctrl+C, or kill the watchdog parent (`pkill -f TwitchDropsMiner`).
-
----
+Full walkthrough: **[docs/getting-started.md](docs/getting-started.md)**.
+Automatic renewal needs a Chromium-based browser on the miner's machine — no
+display required.
 
 ## Commands
 
-### General
+`help` lists everything, `help <cmd>` explains one.
 
-| Command | Purpose |
-|--------|--------|
-| `help [cmd]` | Show help |
-| `status` | Show engine status |
-| `version` | Show version |
-| `log [N]` | Show recent logs |
-| `clear` | Clear screen |
-| `exit` / `quit` / `q` | Exit |
+| | |
+|---|---|
+| `status` `version` `log [N]` `clear` `exit` | general |
+| `whoami` `login` `helper [on\|off\|renew]` | login |
+| `pause` `resume` `reload` `watch <login>` `unwatch` `claim` | mining |
+| `inventory`(`inv`) `campaigns` `drops` | what is being mined |
+| `channels [--all]` `online` | channels |
+| `priority …` `exclude …` `mode …` `proxy …` `lang …` `quality …` `get`/`set` `save` | settings |
+| `level <LEVEL>` `dump [on\|off]` | debug |
 
-### Login
+## CLI arguments
 
-| Command | Purpose |
-|--------|--------|
-| `whoami` | Show login status |
-| `login` | Force re‑login instructions |
+| Argument | |
+|---|---|
+| `-v` … `-vvvv` | raise log verbosity |
+| `--no-shell` | no prompt (service mode) |
+| `--no-watchdog` | disable the crash-restart supervisor |
+| `--token <file>` | seed `cookies.jar` from a token file |
+| `--dump` | dump every GQL response |
+| `--debug-ws` / `--debug-gql` | debug websocket / GQL traffic |
 
-### Mining control
-
-| Command | Purpose |
-|--------|--------|
-| `pause` | Pause mining |
-| `resume` | Resume mining |
-| `reload` | Restart client |
-| `watch <login>` | Force channel |
-| `unwatch` | Stop watching |
-| `claim` | Claim all drops |
-
-### Inventory
-
-| Command | Purpose |
-|--------|--------|
-| `inventory` / `inv` | Campaigns + drops |
-| `campaigns` | Campaigns only |
-| `drops` | Active drop progress |
-
-### Channels
-
-| Command | Purpose |
-|--------|--------|
-| `channels [--all]` | Known channels |
-| `online` | Online channels |
-
-### Settings
-
-| Command | Purpose |
-|--------|--------|
-| `priority ...` | Manage priority list |
-| `exclude ...` | Manage exclusion list |
-| `mode [...]` | Set priority mode |
-| `proxy [...]` | Set HTTP proxy |
-| `lang [code]` | UI language |
-| `quality [0..2]` | Timeout multiplier |
-| `get / set` | Config access |
-| `save` | Save settings |
-
-### Debug
-
-| Command | Purpose |
-|--------|--------|
-| `level <LEVEL>` | Change log level |
-| `dump [on\|off]` | Toggle GQL dump |
-
----
+A watchdog supervises the worker by default and restarts it on a crash (including
+OOM or `kill -9`); each restart is logged to `log/restart.log`. A clean exit does
+not restart.
 
 ## Files
 
-| File | Purpose |
-|----|--------|
-| `settings.json` | Persistent settings |
-| `cookies.jar` | Login token (**keep secret**) |
-| `lock.file` | Single‑instance lock |
-| `log/` | Auto-created: timestamped logs (`YYYY-MM-DD_HH-MM-SS.log`, rotating) + command history `history` |
-| `cache/` | GUI cache (unused in CLI) |
-
----
-
-## Architecture
-```
-              +---------------------+        +-----------------------+
-              |  twitch.py engine   |  uses  |   gui interface       |
-              |(state machine、GQL、+------->|   (tray, status,      |
-              |  websockets)        |        |    channels, inv,     |
-              +----------+----------+        |    progress, login)   |
-                         |                   +----------+------------+
-                         | self.gui = ...               |
-                         |                              |
-              +----------v----------+        +----------v-----------+
-              |  cli.CLIManager     |        |  gui.GUIManager      |
-              |  （default）        |  XOR   |  (TDM_GUI=1)         |
-              |                     |        |                      |
-              | + interactive shell |        |  + tk/pystray UI     |
-              +----------+----------+        +----------------------+
-                         |
-              +----------v----------+
-              |  commands.py        |
-              |  CommandRegistry    |
-              +---------------------+
-```
-
----
+| | |
+|---|---|
+| `settings.json` | all settings |
+| `cookies.jar` | the saved login — **treat it as a password** |
+| `imported-session.json` | session from the login helper — **also a credential** |
+| `log/` | timestamped logs and command history |
+| `lock.file` | single-instance lock |
 
 ## Common issues
 
-### Cannot connect to Twitch
+- **Cannot connect to Twitch** — the default timeouts are tight; `quality 2`.
+- **Behind a proxy** — `export https_proxy=…` or the `proxy` command.
+- **Don't watch streams with the same account while mining** — progress is
+  per-account and the two interfere.
 
+More in the [guide](docs/getting-started.md#troubleshooting).
 
-`tdm[idle]> quality 2`
+## Credits
 
-
-### Proxy
-
-
-`export https_proxy=http://127.0.0.1:7890`
-
-
-or:
-
-
-`tdm[idle]> proxy http://127.0.0.1:7890`
-
-
-### Do NOT watch streams while mining
-
-Twitch tracks drops per account — watching while mining breaks progress.
-
-### `cookies.jar` is a credential
-
-Treat it like a password. Never commit or share it.
-
----
+- **[DevilXD/TwitchDropsMiner](https://github.com/DevilXD/TwitchDropsMiner)** —
+  the original app and the entire mining engine this fork runs.
+- **[rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner)** —
+  the browser login helper and the integrity renewal design; this project
+  implements the miner side of that protocol.
 
 ## License
 
-MIT — © [DevilXD](https://github.com/DevilXD)
-
----
+MIT — © [DevilXD](https://github.com/DevilXD). See `LICENSE`.
 
 ## Contributing
 
-PRs welcome. Register new commands in `_register_builtins()` and update docs.
+PRs welcome. Register new commands in `commands.py`'s `_register_builtins()` and
+document them in the [guide](docs/getting-started.md#commands).

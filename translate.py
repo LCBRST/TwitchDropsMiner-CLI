@@ -271,6 +271,11 @@ default_cli_translation: CLIMessages = {
         "step_approve": "  3. Approve the login in your browser, then come back.",
     },
     "commands": {
+        "welcome_helper": (
+            "Tip: no campaigns showing up? Run 'helper on', then sign in once with\n"
+            "the desktop login helper on a machine that has Chrome - the full\n"
+            "campaign list comes back once it is in."
+        ),
         "welcome": (
             "Welcome! It looks like this is your first run.\n"
             "Here's how to get started:\n"
@@ -313,7 +318,9 @@ default_cli_translation: CLIMessages = {
             "3. Use 'priority add <game>' to add games to your priority list.\n"
             "4. Use 'mode priority_only' to mine only priority-list games.\n"
             "5. Use 'exclude add <game>' to never mine a specific game.\n"
-            "6. Run 'reload' after changing priority/exclude lists for changes to take effect."
+            "6. Run 'reload' after changing priority/exclude lists for changes to take effect.\n"
+            "7. If no campaigns show up, run 'helper on' and sign in once with the"
+            " desktop login helper - see the Getting started guide."
         ),
         "about_disclaimer_title": "Disclaimer",
         "about_disclaimer": (
@@ -326,7 +333,8 @@ default_cli_translation: CLIMessages = {
             "4. Some games may not reliably track watch time due to issues on Twitch's side.\n"
             "5. Closing the tool will stop all mining. Keep it running to continue "
             "earning drops.\n"
-            "6. If new campaigns do not appear, try running 'reload' to refresh."
+            "6. If no campaigns appear at all, that is a login limitation - use the"
+            " login helper ('helper on'). Running 'reload' will not help."
         ),
         "paused": "paused — engine in IDLE",
         "resumed": "resumed — fetching inventory",
@@ -338,8 +346,7 @@ default_cli_translation: CLIMessages = {
         "watch_switching": "requested switch to {channel}",
         "unwatch_stopped": "stopped watching",
         "login_hint": (
-            "To force a re-login, delete cookies.jar and restart. "
-            "Triggering a runtime re-login isn't supported by the engine."
+            "To log in again, use the login helper: run 'helper on', then run tdm-login-helper on a machine with Chrome. Do not delete cookies.jar - it can hold a token that can no longer be issued."
         ),
         "whoami_status": "status : {status}",
         "whoami_user": "user_id: {id}",
@@ -409,6 +416,29 @@ default_cli_translation: CLIMessages = {
         "level_set": "level set to {level}",
         "dump_enabled": "dump enabled",
         "dump_disabled": "dump disabled",
+        "helper_usage": "usage: helper [on|off|renew]",
+        "helper_state": "login helper: {state}",
+        "helper_state_on": "enabled",
+        "helper_state_off": "disabled",
+        "helper_bind": "listening on {bind}",
+        "helper_reachable": "from another machine: {address}",
+        "helper_reachable_alt": "or: {address}",
+        "helper_multi_hint": "more than one address - use whichever the helper can reach; if none work, check the firewall",
+        "helper_same_machine": "the helper runs on this machine: {address}",
+        "helper_not_listening": "not listening (turn it on with `helper on`)",
+        "helper_bind_failed": "could not open the port - see the log",
+        "helper_started": "login helper endpoint opened - run `helper` to see which address to use",
+        "helper_session_none": "imported session: none",
+        "helper_session_active": "imported session: active, expires {expires}",
+        "helper_session_path": "stored at: {path}",
+        "helper_renewal": "renewal: {state}",
+        "helper_renew_requested": "renewal requested - watch the log, then run `helper` again",
+        "helper_renew_unavailable": "cannot renew now: {reason}",
+        "helper_renewal_auto": "automatic, using {browser}",
+        "helper_renewal_off": "unavailable - {reason}",
+        "helper_renewed": "last renewed: {when}",
+        "helper_renewal_error": "last renewal failed: {code}",
+        "helper_run_hint": "run it where Chrome is installed: tdm-login-helper --tdm {address}",
     },
 }
 

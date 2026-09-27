@@ -24,6 +24,11 @@ class SettingsFile(TypedDict):
     available_drops_check: bool
     priority_mode: PriorityMode
     reload_interval: int
+    helper_server_enabled: bool
+    helper_server_host: str
+    helper_server_port: int
+    renewal_browser_path: str
+    welcome_shown: bool
 
 
 default_settings: SettingsFile = {
@@ -39,6 +44,16 @@ default_settings: SettingsFile = {
     "available_drops_check": False,
     "priority_mode": PriorityMode.PRIORITY_ONLY,
     "reload_interval": 60,
+    # The helper endpoint accepts Twitch credentials, so it stays off until it is
+    # explicitly enabled; see the `helper` command.
+    "helper_server_enabled": False,
+    "helper_server_host": "0.0.0.0",
+    "helper_server_port": 8090,
+    # Empty means "find one": Chromium or Chrome on PATH, then the usual install
+    # locations. Set it when renewal picks the wrong browser.
+    "renewal_browser_path": "",
+    # The first-run guide is shown once. Reset with `set welcome_shown false`.
+    "welcome_shown": False,
 }
 
 
@@ -64,6 +79,11 @@ class Settings:
     available_drops_check: bool
     priority_mode: PriorityMode
     reload_interval: int
+    helper_server_enabled: bool
+    helper_server_host: str
+    helper_server_port: int
+    renewal_browser_path: str
+    welcome_shown: bool
 
     PASSTHROUGH = ("_settings", "_args", "_altered")
 

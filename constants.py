@@ -107,6 +107,8 @@ LOCK_PATH = Path(WORKING_DIR, "lock.file")
 CACHE_PATH = Path(WORKING_DIR, "cache")
 CACHE_DB = Path(CACHE_PATH, "mapping.json")
 COOKIES_PATH = Path(WORKING_DIR, "cookies.jar")
+# Context captured by the desktop login helper; holds credentials, kept 0600.
+IMPORTED_SESSION_PATH = Path(WORKING_DIR, "imported-session.json")
 SETTINGS_PATH = Path(WORKING_DIR, "settings.json")
 # Typing
 JsonType = Dict[str, Any]
@@ -148,7 +150,10 @@ OUTPUT_FORMATTER = logging.Formatter("{levelname}: {message}", style='{', datefm
 
 
 class ClientInfo:
-    def __init__(self, client_url: URL, client_id: str, user_agents: str | list[str]) -> None:
+    def __init__(
+        self, client_url: URL, client_id: str, user_agents: str | list[str], name: str = ""
+    ) -> None:
+        self.NAME: str = name or client_id
         self.CLIENT_URL: URL = client_url
         self.CLIENT_ID: str = client_id
         self.USER_AGENT: str
@@ -169,6 +174,7 @@ class ClientType:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
         ),
+        name="WEB",
     )
     MOBILE_WEB = ClientInfo(
         URL("https://m.twitch.tv"),
@@ -204,7 +210,8 @@ class ClientType:
                 "Mozilla/5.0 (Linux; Android 16; LM-X420) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
-        ]
+        ],
+        name="MOBILE_WEB",
     )
     ANDROID_APP = ClientInfo(
         URL("https://www.twitch.tv"),
@@ -238,7 +245,8 @@ class ClientType:
                 "Dalvik/2.1.0 (Linux; U; Android 14; SM-X306B Build/UP1A.231005.007) "
                 "tv.twitch.android.app/25.3.0/2503006"
             ),
-        ]
+        ],
+        name="ANDROID_APP",
     )
     SMARTBOX = ClientInfo(
         URL("https://android.tv.twitch.tv"),
@@ -247,15 +255,23 @@ class ClientType:
             "Mozilla/5.0 (Linux; Android 7.1; Smart Box C1) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
         ),
+        name="SMARTBOX",
     )
 
 
-# Client type used for all of the app's Twitch traffic, the device code login flow
-# included. Twitch tends to silently disable the device code flow for individual
-# client IDs (ANDROID_APP broke in September 2026, failing the login with an
-# "invalid client" error) - if logging in stops working, point this at another
-# entry of `ClientType` that still allows it.
+# Client type used for all of the app's Twitch traffic, and for the device code login
+# flow when no saved session can be used. Twitch tends to silently disable the device
+# code flow for individual client IDs (ANDROID_APP broke in September 2026, failing
+# the login with an "invalid client" error) - if logging in stops working, point this
+# at another entry of `ClientType` that still allows it.
 CLIENT_TYPE = ClientType.SMARTBOX
+
+# Client types tried, in order, against the sessions saved in `cookies.jar`. Twitch
+# binds API access to the client a token was issued to, and only some of them - the
+# ANDROID_APP one among them - receive the full campaign list, so an existing session
+# is what really decides what the app is able to see. A fresh device code login cannot
+# replace a session listed here, so never trade one in for a new token.
+CLIENT_TYPE_PREFERENCE = (ClientType.ANDROID_APP, ClientType.SMARTBOX)
 
 
 class State(Enum):

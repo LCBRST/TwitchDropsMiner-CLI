@@ -173,7 +173,7 @@ if __name__ == "__main__":
         sys.exit(4)
 
     def _seed_token(token_path: str) -> None:
-        from constants import COOKIES_PATH, CLIENT_TYPE
+        from constants import COOKIES_PATH, CLIENT_TYPE_PREFERENCE
         with open(token_path, "r", encoding="utf8") as fh:
             token = fh.read().strip()
         if not token:
@@ -182,7 +182,11 @@ if __name__ == "__main__":
             return
         import aiohttp
         jar = aiohttp.CookieJar()
-        jar.update_cookies({"auth-token": token}, CLIENT_TYPE.CLIENT_URL)
+        # Which client the token belongs to is only known after asking Twitch, so
+        # store it under every client the app is able to select - the matching one
+        # picks it up on the next start, and the others never look at it.
+        for client_info in CLIENT_TYPE_PREFERENCE:
+            jar.update_cookies({"auth-token": token}, client_info.CLIENT_URL)
         jar.save(COOKIES_PATH)
 
     async def main() -> int:

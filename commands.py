@@ -15,6 +15,7 @@ import shlex
 import sys
 from collections import abc
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 from yarl import URL
@@ -113,6 +114,12 @@ class CommandRegistry:
 
             Command("login", "Force a fresh OAuth device-code login", _cmd_login),
             Command("whoami", "Show the logged-in Twitch user id", _cmd_whoami),
+            Command(
+                "helper",
+                "Show or change the browser login helper endpoint",
+                _cmd_helper,
+                usage="helper [on|off|renew]",
+            ),
 
             Command("pause", "Pause mining (drop into IDLE)", _cmd_pause),
             Command("resume", "Resume mining (re-fetch inventory)", _cmd_resume),
@@ -288,6 +295,105 @@ async def _cmd_whoami(ctx: CommandContext) -> None:
     cli = ctx.cli
     cli.print(_("cli", "commands", "whoami_status").format(status=cli.login.status))
     cli.print(_("cli", "commands", "whoami_user").format(id=cli.login.user_id))
+
+
+async def _cmd_helper(ctx: CommandContext) -> None:
+    """
+    Show or change the login helper endpoint.
+
+    A session captured from a real browser is the only thing that can read the
+    full campaign catalog, so this is how it gets in.
+    """
+    settings = _settings(ctx)
+    if ctx.args:
+        target = ctx.args[0].lower()
+        if target == "renew":
+            # Renewal is normally hours away, which is far too long to wait to
+            # find out whether it works.
+            reason = ctx.twitch.request_renewal()
+            if reason is None:
+                ctx.cli.print(_("cli", "commands", "helper_renew_requested"))
+            else:
+                ctx.cli.print(
+                    _("cli", "commands", "helper_renew_unavailable").format(reason=reason)
+                )
+            return
+        if target not in ("on", "off"):
+            ctx.cli.print(_("cli", "commands", "helper_usage"))
+            return
+        enable = target == "on"
+        if bool(settings.helper_server_enabled) != enable:
+            settings.helper_server_enabled = enable
+            settings.save()
+        await ctx.twitch.apply_helper_settings()
+        # No confirmation line: the status block below already leads with the
+        # state, and saying it twice reads badly.
+    status = ctx.twitch.helper_status()
+    ctx.cli.print_raw(
+        _("cli", "commands", "helper_state").format(
+            state=_(
+                "cli", "commands",
+                "helper_state_on" if status["enabled"] else "helper_state_off",
+            )
+        )
+    )
+    addresses = status["addresses"]
+    if addresses:
+        ctx.cli.print_raw(
+            _("cli", "commands", "helper_bind").format(bind=status["bind"])
+        )
+        for index, address in enumerate(addresses):
+            ctx.cli.print_raw(
+                _(
+                    "cli", "commands",
+                    "helper_reachable" if index == 0 else "helper_reachable_alt",
+                ).format(address=address)
+            )
+        if len(addresses) > 1:
+            ctx.cli.print_raw(_("cli", "commands", "helper_multi_hint"))
+        ctx.cli.print_raw(
+            _("cli", "commands", "helper_same_machine").format(address=status["loopback"])
+        )
+        ctx.cli.print_raw(
+            _("cli", "commands", "helper_run_hint").format(address=addresses[0])
+        )
+    elif status["enabled"]:
+        ctx.cli.print_raw(_("cli", "commands", "helper_bind_failed"))
+    else:
+        ctx.cli.print_raw(_("cli", "commands", "helper_not_listening"))
+    expires_at = status["expires_at"]
+    if status["active"] and expires_at is not None:
+        expires = datetime.fromtimestamp(expires_at, timezone.utc).astimezone()
+        ctx.cli.print_raw(
+            _("cli", "commands", "helper_session_active").format(
+                expires=expires.strftime("%Y-%m-%d %H:%M:%S %Z")
+            )
+        )
+    else:
+        ctx.cli.print_raw(_("cli", "commands", "helper_session_none"))
+    reason = status["renewal_unavailable"]
+    browser = status["browser"]
+    if reason is None and browser:
+        state = _("cli", "commands", "helper_renewal_auto").format(browser=browser)
+    else:
+        state = _("cli", "commands", "helper_renewal_off").format(reason=reason or "-")
+    ctx.cli.print_raw(_("cli", "commands", "helper_renewal").format(state=state))
+    if status["renewal_error"]:
+        ctx.cli.print_raw(
+            _("cli", "commands", "helper_renewal_error").format(
+                code=status["renewal_error"]
+            )
+        )
+    if status["renewed_at"]:
+        renewed = datetime.fromtimestamp(status["renewed_at"], timezone.utc).astimezone()
+        ctx.cli.print_raw(
+            _("cli", "commands", "helper_renewed").format(
+                when=renewed.strftime("%Y-%m-%d %H:%M:%S %Z")
+            )
+        )
+    ctx.cli.print_raw(
+        _("cli", "commands", "helper_session_path").format(path=status["path"])
+    )
 
 
 # Mining control ------------------------------------------------------------
@@ -671,6 +777,8 @@ _GETTABLE_KEYS = (
     "priority", "exclude", "priority_mode", "language", "proxy",
     "connection_quality", "reload_interval", "tray_notifications",
     "enable_badges_emotes", "available_drops_check", "dark_mode", "autostart_tray",
+    "helper_server_enabled", "helper_server_host", "helper_server_port",
+    "renewal_browser_path", "welcome_shown",
 )
 
 

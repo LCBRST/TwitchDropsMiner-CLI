@@ -998,13 +998,22 @@ class CLIManager:
             if self._output_lines:
                 log_buffer.text = "\n".join(self._output_lines) + "\n"
 
-            # First-run guide: show when no priority games configured.
-            if not self._twitch.settings.priority:
+            # First-run guide. This used to key off an empty priority list, so
+            # anyone who never used one got the guide on every single start.
+            if not self._twitch.settings.welcome_shown:
                 log_buffer.text += (
                     "\n"
                     + _("cli", "commands", "welcome")
                     + "\n\n"
                 )
+                # Campaign discovery depends on a session this app cannot mint
+                # for itself, and that is the one thing a new install trips over.
+                if not self._twitch.settings.helper_server_enabled:
+                    log_buffer.text += (
+                        _("cli", "commands", "welcome_helper") + "\n\n"
+                    )
+                self._twitch.settings.welcome_shown = True
+                self._twitch.settings.save()
 
             # Periodic refresh keeps the status-line progress bars
             # alive even when no other print activity is happening.

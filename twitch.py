@@ -44,6 +44,8 @@ from constants import (
     CALL,
     MAX_INT,
     DUMP_PATH,
+    ClientInfo,
+    ClientType,
     COOKIES_PATH,
     MAX_CHANNELS,
     GQL_QUERIES,
@@ -52,6 +54,16 @@ from constants import (
     CLIENT_TYPE,
     PriorityMode,
     WebsocketTopic,
+    CLIENT_TYPE_PREFERENCE,
+    IMPORTED_SESSION_PATH,
+)
+from helper_server import HelperServer
+from browser_cdp import find_browser
+from session_renewal import SessionRenewal
+from session_import import (
+    PrivateSessionFile,
+    SessionBundle,
+    SessionImportError,
 )
 
 if TYPE_CHECKING:
@@ -59,7 +71,7 @@ if TYPE_CHECKING:
     from channel import Stream
     from settings import Settings
     from inventory import TimedDrop
-    from constants import ClientInfo, JsonType, GQLOperation
+    from constants import JsonType, GQLOperation
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -76,6 +88,17 @@ class SkipExtraJsonDecoder(json.JSONDecoder):
 SAFE_LOADS = lambda s: json.loads(s, cls=SkipExtraJsonDecoder)
 
 
+class _ImportReady(MinerException):
+    """
+    Raised out of the device code login when a helper delivers a session.
+
+    Intended for internal use only.
+    """
+
+    def __init__(self):
+        super().__init__("An imported session arrived during login")
+
+
 class _AuthState:
     def __init__(self, twitch: Twitch):
         self._twitch: Twitch = twitch
@@ -86,6 +109,19 @@ class _AuthState:
         self.session_id: str
         self.access_token: str
         self.client_version: str
+        # Imported browser session, if one was delivered by the login helper. It
+        # replaces the cookie session for as long as it is fresh; see
+        # `_use_imported` and `_deactivate_imported`.
+        self._imported_file = PrivateSessionFile(IMPORTED_SESSION_PATH)
+        self._imported: SessionBundle | None = None
+        self._imported_active: bool = False
+        # The stored file is only re-read when it changes, and a file we already
+        # refused is left alone until it does.
+        self._imported_key: tuple[int, int] | None = None
+        self._imported_refused: tuple[int, int] | None = None
+        # Set when a helper installs a session, so a device code login in flight
+        # can give way instead of making the user wait for the code to expire.
+        self._import_pending = asyncio.Event()
 
     def _hasattrs(self, *attrs: str) -> bool:
         return all(hasattr(self, attr) for attr in attrs)
@@ -104,6 +140,143 @@ class _AuthState:
             "client_version",
         )
         self._logged_in.clear()
+
+    @property
+    def imported_active(self) -> bool:
+        return self._imported_active
+
+    def _load_imported(self) -> SessionBundle | None:
+        """Return the stored session when it is present, fresh and not refused."""
+        key = self._imported_file.stat_key()
+        if key is None or key == self._imported_refused:
+            return None
+        if self._imported is not None and key == self._imported_key:
+            return self._imported
+        try:
+            # The file holds a seed; only its context is used here. The SDK
+            # cookie that goes with it belongs to renewal.
+            bundle = self._imported_file.read().bundle
+            bundle.require_fresh()
+        except SessionImportError as error:
+            if error.code != "MISSING":
+                logger.warning(
+                    f"Ignoring the imported session ({error.code}) - falling back to"
+                    f" the saved login"
+                )
+            self._imported_refused = key
+            return None
+        self._imported, self._imported_key = bundle, key
+        return bundle
+
+    def _refuse_imported(self, reason: str) -> bool:
+        """Give up on the stored file, restoring the previous identity."""
+        self._imported_refused = self._imported_key
+        self._imported = None
+        self._imported_active = False
+        self._import_pending.clear()
+        self._twitch._client_type = CLIENT_TYPE
+        logger.warning(f"{reason} - falling back to the saved login")
+        return False
+
+    async def _use_imported(self) -> bool:
+        """
+        Adopt the imported session, if there is a usable one.
+
+        The context is replayed exactly as it was captured, so its user is looked
+        up once here rather than assumed; nothing about it may be re-derived.
+        """
+        bundle = self._load_imported()
+        if bundle is None:
+            # No usable file: make sure a wake-up for one that never worked does
+            # not keep interrupting the device code login.
+            self._import_pending.clear()
+            return False
+        # Adopt the identity before verifying it, so the verification request is
+        # made without anything from the cookie session travelling with it.
+        # The captured user agent is part of the context, so it has to travel with
+        # it - the built-in WEB entry would send a different browser's.
+        self._twitch._client_type = ClientInfo(
+            ClientType.WEB.CLIENT_URL, ClientType.WEB.CLIENT_ID, bundle.user_agent
+        )
+        self._imported, self._imported_active = bundle, True
+        try:
+            async with self._twitch.request(
+                "GET",
+                "https://id.twitch.tv/oauth2/validate",
+                headers={
+                    "Authorization": bundle.headers["authorization"],
+                    "User-Agent": bundle.user_agent,
+                },
+            ) as response:
+                if response.status != 200:
+                    return self._refuse_imported("The imported session was rejected by Twitch")
+                identity = await response.json()
+        except RequestException:
+            return self._refuse_imported("The imported session could not be verified")
+        if (
+            not isinstance(identity, dict)
+            or identity.get("client_id") != ClientType.WEB.CLIENT_ID
+        ):
+            return self._refuse_imported(
+                "The imported session does not belong to the web client"
+            )
+        try:
+            user_id = int(identity["user_id"])
+        except (KeyError, TypeError, ValueError):
+            return self._refuse_imported("The imported session carries no usable user ID")
+        if user_id <= 0:
+            return self._refuse_imported("The imported session carries no usable user ID")
+        # Switching accounts mid-run would leave the previous id baked into
+        # websocket topics and cached request payloads.
+        if self._hasattrs("user_id") and self.user_id != user_id:
+            return self._refuse_imported(
+                f"The imported session belongs to user ID {user_id}, but this miner is"
+                f" logged in as {self.user_id}"
+            )
+        self.access_token = bundle.token  # bare: the websocket sends it unprefixed
+        self.device_id = bundle.device_id
+        self.user_id = user_id
+        self._import_pending.clear()
+        self._logged_in.set()
+        logger.info(f"Using the imported browser session for user ID {user_id}")
+        self._twitch.gui.login.update(_("gui", "login", "logged_in"), user_id)
+        return True
+
+    def _deactivate_imported(self, reason: str) -> None:
+        """
+        Stop using the imported session and let the saved login take over.
+
+        Everything the capture provided is dropped together: keeping part of it -
+        the device id, say - while authenticating with the cookie session would
+        mix two identities in one request.
+        """
+        self._imported_refused = self._imported_key
+        self._imported = None
+        self._imported_active = False
+        self._import_pending.clear()
+        self._twitch._client_type = CLIENT_TYPE
+        self.clear()
+        logger.warning(
+            f"The imported session stopped working ({reason}) - falling back to the"
+            f" saved login"
+        )
+
+    def reset_imported(self) -> None:
+        """Forget everything about the imported session, so the file is re-read."""
+        self._imported = None
+        self._imported_active = False
+        self._imported_key = None
+        self._imported_refused = None
+        self._import_pending.clear()
+
+    async def _sleep_or_import(self, delay: float) -> None:
+        # A helper delivering a session mid-login should take effect now, not
+        # after the device code expires.
+        try:
+            await asyncio.wait_for(self._import_pending.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            return
+        raise _ImportReady()
 
     async def _oauth_login(self) -> str:
         login_form = self._twitch.gui.login
@@ -178,7 +351,7 @@ class _AuthState:
                 }
                 while True:
                     # sleep first, not like the user is gonna enter the code *that* fast
-                    await asyncio.sleep(interval)
+                    await self._sleep_or_import(interval)
                     async with self._twitch.request(
                         "POST",
                         "https://id.twitch.tv/oauth2/token",
@@ -342,6 +515,16 @@ class _AuthState:
         raise LoginException("Login flow finished without setting the access token")
 
     def headers(self, *, user_agent: str = '', gql: bool = False) -> JsonType:
+        if self._imported_active and self._imported is not None:
+            # Replay the capture exactly. The integrity proof is only valid for
+            # the precise set of values it was issued alongside, so nothing here
+            # may be recomputed - not even the user agent.
+            imported_headers: JsonType = dict(self._imported.headers)
+            imported_headers["User-Agent"] = self._imported.user_agent
+            if gql:
+                imported_headers["Origin"] = "https://www.twitch.tv"
+                imported_headers["Referer"] = "https://www.twitch.tv/"
+            return imported_headers
         client_info: ClientInfo = self._twitch._client_type
         headers = {
             "Accept": "*/*",
@@ -370,11 +553,30 @@ class _AuthState:
             await self._validate()
 
     async def _validate(self):
+        while True:
+            try:
+                await self._validate_once()
+                return
+            except _ImportReady:
+                # The device code login was interrupted by a helper delivering a
+                # session; start over so it is picked up.
+                logger.info("Restarting login with the newly imported session")
+                self.clear()
+
+    async def _validate_once(self):
         if not hasattr(self, "session_id"):
             self.session_id = create_nonce(CHARS_HEX_LOWER, 16)
         if not self._hasattrs("device_id", "access_token", "user_id"):
+            # A session captured from a real browser is the only thing that can
+            # read the campaign catalog, so prefer it while it lasts; the saved
+            # login is the fallback once it expires.
+            if await self._use_imported():
+                return
             session = await self._twitch.get_session()
             jar = cast(aiohttp.CookieJar, session.cookie_jar)
+            # Which client we get to use is decided by what's saved in cookies.jar,
+            # not by the default - see `_select_client` for why.
+            await self._twitch._select_client(jar)
             client_info: ClientInfo = self._twitch._client_type
         if not self._hasattrs("device_id"):
             async with self._twitch.request(
@@ -394,10 +596,11 @@ class _AuthState:
             login_form = self._twitch.gui.login
             logger.info("Checking login")
             login_form.update(_("gui", "login", "logging_in"), None)
+            use_saved_token = True
             for client_mismatch_attempt in range(2):
                 for invalid_token_attempt in range(2):
                     cookie = jar.filter_cookies(client_info.CLIENT_URL)
-                    if "auth-token" not in cookie:
+                    if not use_saved_token or "auth-token" not in cookie:
                         self.access_token = await self._oauth_login()
                         cookie["auth-token"] = self.access_token
                     elif not hasattr(self, "access_token"):
@@ -423,10 +626,17 @@ class _AuthState:
                 # ensure the cookie's client ID matches the currently selected client
                 if validate_response["client_id"] == client_info.CLIENT_ID:
                     break
-                # otherwise, we need to delete the entire cookie file and clear the jar
-                logger.info("Cookie client ID mismatch")
-                jar.clear()
-                COOKIES_PATH.unlink(missing_ok=True)
+                # The saved session was issued to a different client. Twitch scopes API
+                # access to the issuing client, so we cannot use it - but those are the
+                # only sessions that can read the campaigns API, and once Twitch drops
+                # a client's device code flow, its tokens can never be minted again.
+                # Keep cookies.jar untouched and log in for the client we need instead.
+                logger.warning(
+                    f"Saved session was issued to client {validate_response['client_id']},"
+                    f" not to {client_info.NAME} - keeping it and logging in"
+                )
+                self._delattrs("access_token")
+                use_saved_token = False
             else:
                 raise RuntimeError("Login verification failure (step #1)")
             self.user_id = int(validate_response["user_id"])
@@ -453,13 +663,22 @@ class Twitch:
         self._drops: dict[str, TimedDrop] = {}
         self._campaigns: dict[str, DropsCampaign] = {}
         self._mnt_triggers: deque[datetime] = deque()
+        # set once the campaigns API has come back empty, to keep the warning from
+        # repeating on every inventory refresh
+        self._no_campaigns_warned: bool = False
         # NOTE: GQL is pretty volatile and breaks everything if one runs into their rate limit.
         # Do not modify the default, safe values.
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
         # Client type, session and auth
         self._client_type: ClientInfo = CLIENT_TYPE
         self._session: aiohttp.ClientSession | None = None
+        # Used instead of `_session` while an imported browser session is active:
+        # that identity must not be accompanied by the saved login's cookies.
+        self._imported_session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
+        self._helper_server: HelperServer | None = None
+        # Keeps the imported session's integrity proof alive; started per run.
+        self._renewal: SessionRenewal | None = None
         if os.environ.get("TDM_GUI") == "1":
             raise ImportError("GUI is not available — install the upstream release.")
         from cli import CLIManager
@@ -473,6 +692,28 @@ class Twitch:
         self.websocket = WebsocketPool(self)
         # Maintenance task
         self._mnt_task: asyncio.Task[None] | None = None
+
+    async def get_imported_session(self) -> aiohttp.ClientSession:
+        """
+        A session that carries no cookies at all.
+
+        An imported session is a complete identity on its own; attaching cookies
+        from `cookies.jar` to it would present Twitch with two accounts in one
+        request, which is exactly what makes such a context stop working.
+        """
+        if (session := self._imported_session) is not None:
+            if session.closed:
+                raise RuntimeError("Session is closed")
+            return session
+        timeout = aiohttp.ClientTimeout(sock_connect=5, total=10)
+        self._imported_session = aiohttp.ClientSession(
+            timeout=timeout,
+            connector=aiohttp.TCPConnector(limit=50),
+            cookie_jar=aiohttp.DummyCookieJar(),
+            headers={"User-Agent": self._client_type.USER_AGENT},
+            trust_env=True,
+        )
+        return self._imported_session
 
     async def get_session(self) -> aiohttp.ClientSession:
         if (session := self._session) is not None:
@@ -510,9 +751,197 @@ class Twitch:
         )
         return self._session
 
+    async def _start_helper_server(self) -> None:
+        """Open the login helper endpoints, if they are enabled."""
+        if self._helper_server is not None:
+            return
+        if not self.settings.helper_server_enabled:
+            return
+        server = HelperServer(
+            host=self.settings.helper_server_host,
+            port=self.settings.helper_server_port,
+            on_accepted=self._on_helper_accepted,
+            enabled=lambda: self.settings.helper_server_enabled,
+            expected_user_id=self._expected_helper_user_id,
+        )
+        try:
+            await server.start()
+        except OSError as exc:
+            # A busy port must not keep the miner from running: it still has the
+            # saved login, and Windows keeps a port in TIME_WAIT across the quick
+            # restart the watchdog performs.
+            logger.warning(
+                f"Could not listen on {server.bind_address} for the login helper"
+                f" ({exc}) - importing a session is unavailable"
+            )
+            return
+        self._helper_server = server
+        # Just the one line here: the addresses are a block, and printing them on
+        # every start would drown out everything else. `helper` shows them.
+        self.print(_("cli", "commands", "helper_started"))
+
+    async def apply_helper_settings(self) -> None:
+        """Make the running endpoint match the setting."""
+        if self.settings.helper_server_enabled:
+            await self._start_helper_server()
+        elif self._helper_server is not None:
+            await self._helper_server.stop()
+            self._helper_server = None
+
+    def _start_renewal(self) -> None:
+        """
+        Start keeping the imported session alive.
+
+        Independent of the helper endpoint: the helper only delivers sessions,
+        while renewal continues from what is already stored, so the endpoint can
+        stay closed.
+        """
+        if self._renewal is not None:
+            return
+        self._renewal = SessionRenewal(
+            browser_path=self.settings.renewal_browser_path,
+            on_renewed=self._on_session_renewed,
+        )
+        self._renewal.start()
+
+    def _expected_helper_user_id(self) -> int | None:
+        """The account an incoming session must belong to, if one is in use."""
+        if self._auth_state._hasattrs("user_id"):
+            return self._auth_state.user_id
+        return None
+
+    def _adopt_imported(self, user_id: int, reason: str) -> None:
+        """
+        Switch over to a session that was just stored.
+
+        Runs in whichever task stored it, so it only records the fact; the next
+        login check performs the switch, which is also how a device code login
+        in flight gets out of the way.
+        """
+        auth_state = self._auth_state
+        auth_state._imported = None
+        auth_state._imported_key = None
+        auth_state._imported_refused = None
+        auth_state._import_pending.set()
+        if auth_state.imported_active and auth_state._hasattrs("access_token", "user_id"):
+            # Replace the context in use rather than waiting for it to expire.
+            auth_state.clear()
+            auth_state._imported_active = False
+            self._client_type = CLIENT_TYPE
+        logger.info(f"{reason} for user ID {user_id}")
+        self.gui.login.update(_("gui", "login", "logged_in"), user_id)
+
+    def _on_helper_accepted(self, user_id: int) -> None:
+        self._adopt_imported(user_id, "The login helper delivered a session")
+        if self._renewal is not None:
+            # A newly imported session replaces whatever was being renewed.
+            self._renewal.notify_changed()
+
+    def _on_session_renewed(self, user_id: int) -> None:
+        self._adopt_imported(user_id, "Renewed the imported session")
+
+    def request_renewal(self) -> str | None:
+        """
+        Renew the imported session now.
+
+        Returns None when the request was accepted, or the reason it cannot be
+        done - asked for freshly, so this never reports success for a renewal
+        that is about to fail for a reason already known.
+        """
+        if self._renewal is None:
+            return "renewal is not running"
+        reason = self._renewal.can_renew()
+        if reason is not None:
+            return reason
+        self._renewal.request_renewal()
+        return None
+
+    def helper_status(self) -> JsonType:
+        auth_state = self._auth_state
+        bundle = auth_state._imported
+        renewal = self._renewal
+        return {
+            "enabled": bool(self.settings.helper_server_enabled),
+            "addresses": list(self._helper_server.addresses) if self._helper_server else [],
+            "bind": self._helper_server.bind_address if self._helper_server is not None else None,
+            "loopback": self._helper_server.loopback if self._helper_server is not None else None,
+            "active": auth_state.imported_active,
+            "expires_at": bundle.expires_at if bundle is not None else None,
+            "path": str(IMPORTED_SESSION_PATH),
+            "renewal_unavailable": (
+                renewal.unavailable_reason if renewal is not None
+                else "renewal is not running"
+            ),
+            "renewal_error": renewal.last_error if renewal is not None else None,
+            "renewed_at": renewal.last_renewed_at if renewal is not None else None,
+            "browser": find_browser(self.settings.renewal_browser_path),
+        }
+
+    async def _validate_token(self, token: str) -> str | None:
+        """Return the client ID an access token was issued to, or None if unusable."""
+        async with self.request(
+            "GET",
+            "https://id.twitch.tv/oauth2/validate",
+            headers={"Authorization": f"OAuth {token}"},
+        ) as response:
+            if response.status != 200:
+                return None
+            validate_response = await response.json()
+            return cast(str, validate_response.get("client_id"))
+
+    @staticmethod
+    def _stored_tokens(jar: aiohttp.CookieJar) -> list[str]:
+        """Return the unique access tokens saved in the cookie jar."""
+        tokens: list[str] = []
+        for cookies in jar._cookies.values():
+            token = cookies.get("auth-token")
+            if token is not None and token.value not in tokens:
+                tokens.append(token.value)
+        return tokens
+
+    async def _select_client(self, jar: aiohttp.CookieJar) -> None:
+        """Point the client type at whichever saved session cookies.jar actually has.
+
+        Twitch binds API access - the campaigns list in particular - to the client a
+        token was issued to, and only some of them still receive the full list, so it
+        is the saved sessions that decide which client has to be used. Sessions of a
+        client whose device code flow Twitch disabled can never be minted again, so
+        they are always preferred over logging in. Falls back to `CLIENT_TYPE` when
+        nothing usable is saved, which then drives the login flow.
+        """
+        client_ids: dict[str, str] = {}
+        for token in self._stored_tokens(jar):
+            client_id = await self._validate_token(token)
+            if client_id is not None:
+                client_ids.setdefault(client_id, token)
+        chosen: ClientInfo | None = None
+        for candidate in CLIENT_TYPE_PREFERENCE:
+            if candidate.CLIENT_ID not in client_ids:
+                continue
+            # the token also has to be reachable through the client's own URL,
+            # otherwise `filter_cookies` finds nothing and we'd log in regardless
+            if "auth-token" not in jar.filter_cookies(candidate.CLIENT_URL):
+                continue
+            chosen = candidate
+            break
+        if chosen is None:
+            chosen = CLIENT_TYPE
+            logger.info(f"No saved session can be used, defaulting to the {chosen.NAME} client")
+        else:
+            logger.info(f"Using the saved {chosen.NAME} session")
+        self._client_type = chosen
+        if self._session is not None and not self._session.closed:
+            self._session.headers["User-Agent"] = chosen.USER_AGENT
+
     async def shutdown(self) -> None:
         start_time = time()
         self.stop_watching()
+        if self._renewal is not None:
+            await self._renewal.stop()
+            self._renewal = None
+        if self._helper_server is not None:
+            await self._helper_server.stop()
+            self._helper_server = None
         if self._watching_task is not None:
             self._watching_task.cancel()
             self._watching_task = None
@@ -532,10 +961,15 @@ class Twitch:
             cookie_jar.save(COOKIES_PATH)
             await self._session.close()
             self._session = None
+        if self._imported_session is not None:
+            await self._imported_session.close()
+            self._imported_session = None
         self._drops.clear()
         self.channels.clear()
         self.inventory.clear()
         self._auth_state.clear()
+        # Re-read the stored file after a reload; it is not part of the login.
+        self._auth_state.reset_imported()
         self.wanted_games.clear()
         self._mnt_triggers.clear()
         # wait at least half a second + whatever it takes to complete the closing
@@ -630,6 +1064,11 @@ class Twitch:
         • Changing the stream that's being watched if necessary
         """
         self.gui.start()
+        # Opened before logging in: the device code flow blocks for as long as it
+        # takes the user to approve it, and the helper delivering a session is one
+        # of the ways out of it.
+        await self._start_helper_server()
+        self._start_renewal()
         auth_state = await self.get_auth()
         await self.websocket.start()
         # NOTE: watch task is explicitly restarted on each new run
@@ -1260,7 +1699,11 @@ class Twitch:
     async def request(
         self, method: str, url: URL | str, *, invalidate_after: datetime | None = None, **kwargs
     ) -> abc.AsyncIterator[aiohttp.ClientResponse]:
-        session = await self.get_session()
+        session = await (
+            self.get_imported_session()
+            if self._auth_state.imported_active
+            else self.get_session()
+        )
         method = method.upper()
         if self.settings.proxy and "proxy" not in kwargs:
             kwargs["proxy"] = self.settings.proxy
@@ -1370,6 +1813,24 @@ class Twitch:
                                     data_dict = data_dict[key]
                                 data_dict[path[-1]] = None
                                 break
+                            elif error_dict["message"] in (
+                                "failed integrity check",
+                                "invalid oauth token",
+                            ):
+                                # The imported browser context has stopped being
+                                # accepted. It is the only session that can read
+                                # the campaign catalog, so giving up on it here
+                                # means falling back to the saved login rather
+                                # than failing the whole request.
+                                if auth_state.imported_active:
+                                    auth_state._deactivate_imported(error_dict["message"])
+                                    force_retry = True
+                                    if delay < 5:
+                                        # give the fallback login a moment, it may
+                                        # have to run a device code flow
+                                        delay = 5
+                                    break
+                                raise GQLException(response_json['errors'])
                             elif (
                                 error_dict["message"] in (
                                     "service timeout",
@@ -1448,6 +1909,19 @@ class Twitch:
         # fetch general available campaigns data (campaigns)
         response = await self.gql_request(GQL_QUERIES["Campaigns"])
         available_list: list[JsonType] = response["data"]["currentUser"]["dropCampaigns"] or []
+        if available_list:
+            self._no_campaigns_warned = False
+        elif not self._no_campaigns_warned:
+            # Twitch gates `dropCampaigns` on the client the session's token was issued
+            # to, so an empty catalog means this client cannot see campaigns at all, not
+            # that none are running. Campaigns already in progress keep working, which
+            # makes the failure look like a healthy miner with a suspiciously short list.
+            self._no_campaigns_warned = True
+            logger.warning(
+                f"The campaigns API returned no campaigns for the {self._client_type.NAME}"
+                f" client - campaign discovery is not working. Only campaigns already in"
+                f" progress can be mined; a different saved session may restore the rest."
+            )
         applicable_statuses = ("ACTIVE", "UPCOMING")
         available_campaigns: dict[str, JsonType] = {
             c["id"]: c
