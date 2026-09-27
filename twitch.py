@@ -1462,11 +1462,16 @@ class Twitch:
             while self._mnt_triggers and self._mnt_triggers[0] <= next_trigger:
                 next_trigger = self._mnt_triggers.popleft()
             trigger_type: str = "Reload" if next_trigger == next_period else "Cleanup"
+            # Not astimezone(): it builds the local zone from tm_gmtoff, which the
+            # Windows CRT does not fill in reliably, leaving a UTC wall clock
+            # labelled with the local zone's name. fromtimestamp() is the
+            # platform's own local conversion.
+            local_trigger = datetime.fromtimestamp(next_trigger.timestamp())
             logger.log(
                 CALL,
                 (
                     "Maintenance task waiting until: "
-                    f"{next_trigger.astimezone().strftime('%X')} ({trigger_type})"
+                    f"{local_trigger.strftime('%X')} ({trigger_type})"
                 )
             )
             await asyncio.sleep((next_trigger - now).total_seconds())

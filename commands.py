@@ -13,9 +13,9 @@ from __future__ import annotations
 import logging
 import shlex
 import sys
+import time
 from collections import abc
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 from yarl import URL
@@ -297,6 +297,22 @@ async def _cmd_whoami(ctx: CommandContext) -> None:
     cli.print(_("cli", "commands", "whoami_user").format(id=cli.login.user_id))
 
 
+def _local_time(stamp: float) -> str:
+    """
+    Format an epoch timestamp in the machine's own timezone.
+
+    `datetime.astimezone()` with no argument looks like the obvious way, and it
+    is wrong on Windows: it builds the local zone from `time.localtime()`'s
+    `tm_gmtoff`, a field the Windows CRT does not fill in reliably. The zone
+    *name* is still right, so the result keeps the UTC wall clock while claiming
+    to be local - a user in China sees 06:15 labelled 中国标准时间.
+
+    `time.localtime` is the platform's own conversion, the same one the system
+    clock uses, so it does not have that problem.
+    """
+    return time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(stamp))
+
+
 # Renewal reports a short reason code; each one has a whole sentence of its own so
 # a translation can be phrased properly rather than glued onto a fragment.
 _RENEWAL_REASONS = {
@@ -386,10 +402,9 @@ async def _cmd_helper(ctx: CommandContext) -> None:
         ctx.cli.print_raw(_("cli", "commands", "helper_not_listening"))
     expires_at = status["expires_at"]
     if status["active"] and expires_at is not None:
-        expires = datetime.fromtimestamp(expires_at, timezone.utc).astimezone()
         ctx.cli.print_raw(
             _("cli", "commands", "helper_session_active").format(
-                expires=expires.strftime("%Y-%m-%d %H:%M:%S %Z")
+                expires=_local_time(expires_at)
             )
         )
     else:
@@ -410,10 +425,9 @@ async def _cmd_helper(ctx: CommandContext) -> None:
             )
         )
     if status["renewed_at"]:
-        renewed = datetime.fromtimestamp(status["renewed_at"], timezone.utc).astimezone()
         ctx.cli.print_raw(
             _("cli", "commands", "helper_renewed").format(
-                when=renewed.strftime("%Y-%m-%d %H:%M:%S %Z")
+                when=_local_time(status["renewed_at"])
             )
         )
     ctx.cli.print_raw(
