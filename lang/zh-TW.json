@@ -38,7 +38,7 @@
             "helper_run_hint": "在裝有 Chrome 的電腦上執行：tdm-login-helper --tdm {address}",
             "helper_same_machine": "助手就在本機：{address}",
             "helper_session_none": "已匯入工作階段：無",
-            "helper_session_active": "已匯入工作階段：生效中，{expires} 到期",
+            "helper_session_active": "已匯入工作階段：生效中 —— 目前證明還有 {remaining}（{expires} 到期）",
             "helper_session_path": "存放於：{path}",
             "helper_renewal": "續簽：{state}",
             "helper_renewal_auto": "自動（使用 {browser}）",

@@ -430,7 +430,7 @@ default_cli_translation: CLIMessages = {
         "helper_started": "login helper endpoint opened - run `helper` to see which address to use",
         "helper_autoclosed": "the session is in, so the login helper endpoint closed itself - `helper on` reopens it",
         "helper_session_none": "imported session: none",
-        "helper_session_active": "imported session: active, expires {expires}",
+        "helper_session_active": "imported session: active - current proof runs out in {remaining} (at {expires})",
         "helper_session_path": "stored at: {path}",
         "helper_renewal": "renewal: {state}",
         "helper_renew_requested": "renewal requested - watch the log, then run `helper` again",

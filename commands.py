@@ -297,6 +297,21 @@ async def _cmd_whoami(ctx: CommandContext) -> None:
     cli.print(_("cli", "commands", "whoami_user").format(id=cli.login.user_id))
 
 
+def _short_duration(seconds: float) -> str:
+    """
+    A compact "how long from now", e.g. `52m`, `1h12m`.
+
+    Twitch hands out integrity proofs with lifetimes as short as an hour, so the
+    expiry alone is a countdown that always looks imminent; the remaining time is
+    what a reader actually wants. No unit words, so nothing needs translating.
+    """
+    minutes = max(0, int(seconds)) // 60
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
+
+
 def _local_time(stamp: float) -> str:
     """
     Format an epoch timestamp in the machine's own timezone.
@@ -404,7 +419,8 @@ async def _cmd_helper(ctx: CommandContext) -> None:
     if status["active"] and expires_at is not None:
         ctx.cli.print_raw(
             _("cli", "commands", "helper_session_active").format(
-                expires=_local_time(expires_at)
+                remaining=_short_duration(expires_at - time.time()),
+                expires=_local_time(expires_at),
             )
         )
     else:

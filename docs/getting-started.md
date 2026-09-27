@@ -166,8 +166,10 @@ keep up with it.
 
 ## Keeping the login alive
 
-The imported session carries an integrity proof that expires after about 16
-hours. The miner renews it automatically, a few minutes before it lapses: it
+The imported session carries an integrity proof with a lifetime Twitch decides,
+and it is not generous: it measured sixteen hours for an anonymous request and
+one hour for a signed-in one. The miner renews it automatically, a few minutes
+before it lapses: it
 starts a temporary **headless** Chromium, replays the captured session into it,
 and lets the page mint a fresh proof, which is verified before being adopted.
 

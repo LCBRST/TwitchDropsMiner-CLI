@@ -38,7 +38,7 @@
             "helper_run_hint": "在装了 Chrome 的电脑上执行：tdm-login-helper --tdm {address}",
             "helper_same_machine": "助手就在本机：{address}",
             "helper_session_none": "已导入会话：无",
-            "helper_session_active": "已导入会话：生效中，{expires} 到期",
+            "helper_session_active": "已导入会话：生效中 —— 当前证明还有 {remaining}（{expires} 到期）",
             "helper_session_path": "存放于：{path}",
             "helper_renewal": "续签：{state}",
             "helper_renew_requested": "已请求续签 —— 看日志，稍后再执行一次 `helper`",

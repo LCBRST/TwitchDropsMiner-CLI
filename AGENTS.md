@@ -207,9 +207,11 @@ Then re-check `campaigns` — it should jump to the full catalogue.
 
 ## Step 6: keep the login alive
 
-The imported session carries an integrity proof that expires in about 16 hours.
-The miner renews it automatically a few minutes before that, by starting a
-temporary headless Chromium on the miner's own machine.
+The imported session carries an integrity proof whose lifetime Twitch decides,
+and it can be short: sixteen hours was measured for an anonymous request, one
+hour for a signed-in session. Do not promise a duration. The miner renews it
+automatically a few minutes before it lapses, by starting a temporary headless
+Chromium on the miner's own machine.
 
 Requirements and checks:
 
@@ -239,7 +241,7 @@ Verify with `google-chrome --version` (or `chromium --version`), then re-run
 handled: the browser is started with `--no-sandbox`, which Chromium requires in
 that case.
 
-Force one now instead of waiting out the 16 hours:
+Force one now instead of waiting for the deadline:
 
 ```
 helper renew
@@ -296,8 +298,8 @@ A deployment is done when all of these hold:
 - [ ] `campaigns` reports a realistic count, not single digits.
 - [ ] `drops` shows a campaign and its progress **increases over a few minutes**.
 - [ ] `helper` shows `imported session: active` (if step 5 was needed).
-- [ ] `helper` shows `renewal: automatic` (if the user wants it to survive past
-      16 hours).
+- [ ] `helper` shows `renewal: automatic` (if the session must outlive the
+      current proof).
 - [ ] `log/` contains no repeating error.
 
 ## Failure and action
