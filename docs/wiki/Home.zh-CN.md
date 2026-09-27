@@ -23,6 +23,14 @@ Twitch 只让部分登录类型看到活动列表，而程序自己能签发的�
 解决办法是**登录助手**：在一台有 Chrome 的机器上跑一次，把一份能看到完整列表的会话交给 miner。
 之后 miner 会自动续签。详见[入门指南](Getting-started.zh-CN#拿回完整活动列表)。
 
+## 让它一直有效
+
+那份会话大约每 16 小时自动续签一次，用的是**跑 miner 那台机器上**的无头浏览器。
+不需要显示器，但那台机器**必须装有一个 Chromium 系浏览器** —— Chrome、Chromium 或 Edge。
+执行 `helper` 看状态，或者 `helper renew` 立刻续一次。
+
+各发行版怎么装，见[让登录保持有效](Getting-started.zh-CN#让登录保持有效)。
+
 ## 凭据
 
 `cookies.jar` 和 `imported-session.json` 都是凭据。别提交、别外传、别往公网同步 ——

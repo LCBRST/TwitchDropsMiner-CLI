@@ -28,6 +28,16 @@ A small **login helper**, run once on a machine with Google Chrome, hands over a
 session that can see everything. From then on the miner renews it by itself.
 See [Getting started](Getting-started#getting-the-full-campaign-list).
 
+## Keeping it working
+
+That session renews itself roughly every 16 hours, using a headless browser on
+the machine running the miner. No display is needed, but **a Chromium-based
+browser has to be installed there** — Chrome, Chromium or Edge. Run `helper` to
+see the state, or `helper renew` to force one now.
+
+See [Keeping the login alive](Getting-started#keeping-the-login-alive) for the
+per-distribution install commands.
+
 ## Credentials
 
 `cookies.jar` and `imported-session.json` are both credentials. Never commit,
