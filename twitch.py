@@ -681,6 +681,8 @@ class Twitch:
         self._renewal: SessionRenewal | None = None
         # Deferred shutdown of the helper endpoint after a session is imported.
         self._helper_close_task: asyncio.Task | None = None
+        # Re-installs an imported session that was just stored or renewed.
+        self._adopt_task: asyncio.Task | None = None
         if os.environ.get("TDM_GUI") == "1":
             raise ImportError("GUI is not available — install the upstream release.")
         from cli import CLIManager
@@ -832,6 +834,19 @@ class Twitch:
             self._client_type = CLIENT_TYPE
         logger.info(f"{reason} for user ID {user_id}")
         self.gui.login.update(_("gui", "login", "logged_in"), user_id)
+        # Re-install immediately. The clear above only marks that the session must
+        # be read again, and that read happens in `_validate` - which is driven by
+        # GQL requests. On an idle miner those can be an hour apart, and until one
+        # arrives `helper` reports no session at all even though the file is fine.
+        self._adopt_task = asyncio.create_task(self._readopt_imported())
+
+    async def _readopt_imported(self) -> None:
+        try:
+            await self._auth_state.validate()
+        except MinerException:
+            pass  # an exit or reload is already being handled
+        except Exception:
+            logger.exception("Could not re-install the imported session")
 
     def _on_helper_accepted(self, user_id: int) -> None:
         self._adopt_imported(user_id, "The login helper delivered a session")
@@ -966,6 +981,9 @@ class Twitch:
     async def shutdown(self) -> None:
         start_time = time()
         self.stop_watching()
+        if self._adopt_task is not None:
+            self._adopt_task.cancel()
+            self._adopt_task = None
         if self._helper_close_task is not None:
             self._helper_close_task.cancel()
             self._helper_close_task = None
