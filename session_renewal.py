@@ -56,6 +56,23 @@ SDK_SCRIPT = (
 
 STUB_PAGE = b"<!doctype html><html><body></body></html>"
 
+# Renewal reports a short code so the UI can translate it; the log gets the full
+# sentence from here, because a log line is read by a person debugging and can
+# afford to be explicit.
+UNAVAILABLE_LOGS = {
+    "no-session": "no session has been imported yet",
+    "no-sdk-cookie": (
+        "the imported session has no SDK cookie, so it cannot be renewed -"
+        " run the login helper again"
+    ),
+    "no-browser": "no Chromium-based browser was found on this machine",
+    "sdk-expired": (
+        "the stored SDK cookie has expired, so it cannot be renewed -"
+        " run the login helper again"
+    ),
+    "not-running": "the renewal task is not running",
+}
+
 
 class SDKExchange:
     """Correlate a POST issuance with its uncached network response."""
@@ -329,16 +346,19 @@ class SessionRenewal:
 
     @property
     def unavailable_reason(self) -> str | None:
-        """Why renewal cannot run, or None when it can."""
+        """Why renewal cannot run, as a short code, or None when it can."""
         return self._unavailable
 
-    def _set_unavailable(self, reason: str | None) -> None:
-        if reason != self._unavailable:
-            if reason is not None:
-                logger.warning(f"Session renewal is unavailable: {reason}")
+    def _set_unavailable(self, code: str | None) -> None:
+        if code != self._unavailable:
+            if code is not None:
+                logger.warning(
+                    "Session renewal is unavailable:"
+                    f" {UNAVAILABLE_LOGS.get(code, code)}"
+                )
             else:
                 logger.info("Session renewal is available")
-            self._unavailable = reason
+            self._unavailable = code
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -388,18 +408,23 @@ class SessionRenewal:
 
     def can_renew(self) -> str | None:
         """
-        Why renewal cannot run right now, or None when it can.
+        Why renewal cannot run right now, as a short code, or None when it can.
+
+        A code rather than a sentence: the caller may be putting this in front of
+        a user, and that text has to be translatable. The wording for the log -
+        which is English by design and wants to be more explicit - lives in
+        `UNAVAILABLE_LOGS`.
 
         Reads the stored session directly rather than reporting a cached verdict,
         so a request made before the loop has had its first look gets the truth.
         """
         seed = self._read_seed()
         if seed is None:
-            return "no session has been imported yet"
+            return "no-session"
         if seed.cookie is None:
-            return "the imported session has no SDK cookie, so run the login helper again"
+            return "no-sdk-cookie"
         if not find_browser(self.browser_path):
-            return "no Chromium-based browser was found on this machine"
+            return "no-browser"
         return None
 
     async def _run(self) -> None:
@@ -424,7 +449,7 @@ class SessionRenewal:
                 self.last_error = error.code
                 if error.code in ("SDK_EXPIRED", "SDK_SEED"):
                     # Nothing left to renew from; wait for a new helper login.
-                    self._set_unavailable(f"the SDK cookie is no longer usable ({error.code})")
+                    self._set_unavailable("sdk-expired")
                     await self._wait(self.IDLE_POLL)
                     continue
                 if error.code == "BROWSER_START":

@@ -849,7 +849,7 @@ class Twitch:
         that is about to fail for a reason already known.
         """
         if self._renewal is None:
-            return "renewal is not running"
+            return "not-running"
         reason = self._renewal.can_renew()
         if reason is not None:
             return reason
@@ -870,7 +870,7 @@ class Twitch:
             "path": str(IMPORTED_SESSION_PATH),
             "renewal_unavailable": (
                 renewal.unavailable_reason if renewal is not None
-                else "renewal is not running"
+                else "not-running"
             ),
             "renewal_error": renewal.last_error if renewal is not None else None,
             "renewed_at": renewal.last_renewed_at if renewal is not None else None,

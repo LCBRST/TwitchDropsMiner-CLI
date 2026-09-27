@@ -297,6 +297,27 @@ async def _cmd_whoami(ctx: CommandContext) -> None:
     cli.print(_("cli", "commands", "whoami_user").format(id=cli.login.user_id))
 
 
+# Renewal reports a short reason code; each one has a whole sentence of its own so
+# a translation can be phrased properly rather than glued onto a fragment.
+_RENEWAL_REASONS = {
+    "no-session": "helper_unavailable_no_session",
+    "no-sdk-cookie": "helper_unavailable_no_sdk_cookie",
+    "no-browser": "helper_unavailable_no_browser",
+    "sdk-expired": "helper_unavailable_sdk_expired",
+    "not-running": "helper_unavailable_not_running",
+}
+
+
+def _renewal_reason(code: str | None) -> str:
+    """Turn a renewal status code into something the user can read."""
+    key = _RENEWAL_REASONS.get(code or "")
+    if key is None:
+        # Never show a bare code, and never raise on a code this build does not
+        # know - a newer one could always turn up.
+        return _("cli", "commands", "helper_unavailable_unknown")
+    return _("cli", "commands", key)
+
+
 async def _cmd_helper(ctx: CommandContext) -> None:
     """
     Show or change the login helper endpoint.
@@ -315,7 +336,9 @@ async def _cmd_helper(ctx: CommandContext) -> None:
                 ctx.cli.print(_("cli", "commands", "helper_renew_requested"))
             else:
                 ctx.cli.print(
-                    _("cli", "commands", "helper_renew_unavailable").format(reason=reason)
+                    _("cli", "commands", "helper_renew_unavailable").format(
+                        reason=_renewal_reason(reason)
+                    )
                 )
             return
         if target not in ("on", "off"):
@@ -376,7 +399,9 @@ async def _cmd_helper(ctx: CommandContext) -> None:
     if reason is None and browser:
         state = _("cli", "commands", "helper_renewal_auto").format(browser=browser)
     else:
-        state = _("cli", "commands", "helper_renewal_off").format(reason=reason or "-")
+        state = _("cli", "commands", "helper_renewal_off").format(
+            reason=_renewal_reason(reason)
+        )
     ctx.cli.print_raw(_("cli", "commands", "helper_renewal").format(state=state))
     if status["renewal_error"]:
         ctx.cli.print_raw(

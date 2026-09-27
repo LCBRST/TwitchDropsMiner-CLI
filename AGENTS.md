@@ -324,10 +324,14 @@ it, and match the suffix below.
 | log: `Rejected an imported session: ACCOUNT_MISMATCH` | the helper signed into a different account than the miner is using | either run the helper against the same account, or delete `imported-session.json` and restart to switch |
 | log: `Rejected an imported session: CATALOG` | that session cannot read the catalogue | run the helper again |
 | `renewal: unavailable - no session has been imported yet` | nothing imported | expected before step 5 |
-| `renewal: unavailable - no Chromium-based browser was found` | no browser on the miner | install one, or `set renewal_browser_path …` |
-| `renewal: unavailable - the imported session has no SDK cookie` | the stored session predates renewal, or the cookie expired | run the helper again |
-| `last renewal failed: BROWSER_START` | the browser was found but will not start | usually missing shared libraries on a minimal host, or a snap/flatpak wrapper |
-| `last renewal failed: SDK_ISSUANCE` / `SDK_TIMEOUT` | Twitch's SDK did not answer inside the browser | transient; it retries. If persistent, check the machine can reach `k.twitchcdn.net` and `gql.twitch.tv` |
+| `renewal: unavailable - the imported session has no SDK cookie, so it cannot be renewed - run the login helper again` | the stored session predates renewal | run the helper again |
+| `renewal: unavailable - no Chromium-based browser was found on this machine` | no browser on the miner | install one, or `set renewal_browser_path …` |
+| `renewal: unavailable - the stored SDK cookie has expired, so it cannot be renewed - run the login helper again` | the SDK cookie lapsed | run the helper again |
+| `renewal: unavailable - the renewal task is not running` | the renewal task is not active | report it |
+
+These are the log strings, which is what `log/` contains. The `helper`
+command shows the same reasons translated into the user's language.
+
 | `The imported session stopped working (…)` | the proof expired and renewal did not keep up | it has already fallen back to `cookies.jar`; run the helper again |
 | `Login verification failure` at startup | the saved token is unusable | do **not** delete `cookies.jar`; report it, and use the helper to log in again |
 
