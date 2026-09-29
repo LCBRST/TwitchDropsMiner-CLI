@@ -1526,6 +1526,18 @@ class Twitch:
                 return True
         return False
 
+    def has_acl_work(self, channel: Channel) -> bool:
+        """
+        Whether this channel can still earn a campaign restricted to named channels.
+
+        A campaign with an ``allow`` list only progresses on the channels in it, so
+        one of these is the only thing a channel can offer that no other channel can.
+        """
+        return any(
+            campaign.allowed_channels and campaign.can_earn(channel)
+            for campaign in self.inventory
+        )
+
     def should_switch(self, channel: Channel) -> bool:
         """
         Determines if the given channel qualifies as a switch candidate.
@@ -1541,8 +1553,17 @@ class Twitch:
             # this channel's game is higher order than the watching one's
             channel_order < watching_order
             or channel_order == watching_order  # or the order is the same
-            # and this channel is ACL-based and the watching channel isn't
-            and channel.acl_based > watching_channel.acl_based
+            and (
+                # this channel is ACL-based and the watching channel isn't
+                channel.acl_based > watching_channel.acl_based
+                # or the watched channel has no restricted campaign left while this
+                # one does. Unrestricted campaigns can be earned anywhere, so keeping
+                # the old channel for those would strand every restricted campaign
+                # that needs a different one - and those are the only campaigns with
+                # no other channel to progress them.
+                or self.has_acl_work(channel)
+                and not self.has_acl_work(watching_channel)
+            )
         )
 
     def watch(self, channel: Channel, *, update_status: bool = True):
