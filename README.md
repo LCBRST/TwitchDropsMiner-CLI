@@ -30,8 +30,9 @@ websockets (~199 channels), automatic campaign discovery, auto channel switching
 persistent login, auto-claiming, auto start/stop.
 
 Added here: an interactive shell with live settings, `pause` / `resume` /
-`reload`, manual channel selection, pipe-friendly output, and a **browser login
-helper** that restores the full campaign catalogue plus automatic session renewal.
+`reload`, manual channel selection, pipe-friendly output, and a **browser
+sign-in** the miner starts itself, which restores the full campaign catalogue
+plus automatic session renewal.
 
 ## Install
 
@@ -44,6 +45,14 @@ chmod +x ./TwitchDropsMiner-CLI_Linux && ./TwitchDropsMiner-CLI_Linux   # Linux
 ```
 ```powershell
 .\TwitchDropsMiner-CLI_Windows.exe                                     # Windows
+```
+
+**Linux, one command** — installs the browser and `Xvfb`, builds from source, and
+cleans the build environment up afterwards:
+
+```bash
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+chmod +x install_linux.sh && ./install_linux.sh
 ```
 
 **From source** — Python 3.10+, any of Linux / macOS / Windows:
@@ -64,8 +73,9 @@ python main.py              # interactive shell
 python main.py --no-shell   # no prompt, logs only
 ```
 
-With no saved session it walks you through a one-time device code login and
-stores the token in `cookies.jar`. Then:
+With no saved session the miner opens a browser of its own and waits for you to
+sign in — the window appears on that machine if it has a screen, and a URL to
+open from anywhere if it does not. Then:
 
 ```
 priority add <game>     # what you want to mine
@@ -75,19 +85,20 @@ resume                  # start
 ### If no campaigns show up
 
 Twitch only lets some login types see the campaign catalogue, and the ones this
-program can mint for itself no longer qualify. A small **login helper**, run once
-on a machine with Chrome, hands over a session that can — and the miner renews it
-by itself from then on.
+program can mint for itself no longer qualify. **`login browser`** starts a real
+browser on the miner's own machine and keeps the session it captures — one that
+can see everything, and that the miner renews by itself from then on.
 
 ```
-helper on     # then run tdm-login-helper on the desktop, against the address shown
-helper        # shows the imported session and renewal state
-helper renew  # force a renewal now instead of waiting for the deadline
+login browser  # sign in through a browser the miner starts itself
+login status   # shows the imported session and renewal state
+login renew    # force a renewal now instead of waiting for the deadline
 ```
 
 Full walkthrough: **[docs/getting-started.md](docs/getting-started.md)**.
-Automatic renewal needs a Chromium-based browser on the miner's machine — no
-display required.
+Signing in and automatic renewal both need a Chromium-based browser on the
+miner's machine. A machine with no screen also needs `Xvfb`, for that browser to
+draw on.
 
 ## Commands
 
@@ -96,7 +107,7 @@ display required.
 | | |
 |---|---|
 | `status` `version` `log [N]` `clear` `exit` | general |
-| `whoami` `login` `helper [on\|off\|renew]` | login |
+| `whoami` `login [browser\|status\|cancel\|renew\|device]` | login |
 | `pause` `resume` `reload` `watch <login>` `unwatch` `claim` | mining |
 | `inventory`(`inv`) `campaigns` `drops` | what is being mined |
 | `channels [--all]` `online` | channels |
@@ -124,7 +135,7 @@ not restart.
 |---|---|
 | `settings.json` | all settings |
 | `cookies.jar` | the saved login — **treat it as a password** |
-| `imported-session.json` | session from the login helper — **also a credential** |
+| `imported-session.json` | the session captured from the sign-in browser — **also a credential** |
 | `log/` | timestamped logs and command history |
 | `lock.file` | single-instance lock |
 
@@ -142,8 +153,8 @@ More in the [guide](docs/getting-started.md#troubleshooting).
 - **[DevilXD/TwitchDropsMiner](https://github.com/DevilXD/TwitchDropsMiner)** —
   the original app and the entire mining engine this fork runs.
 - **[rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner)** —
-  the browser login helper and the integrity renewal design; this project
-  implements the miner side of that protocol.
+  the integrity renewal design: replaying a captured session into a headless
+  browser and letting Kasada's own script mint the next proof.
 
 ## License
 

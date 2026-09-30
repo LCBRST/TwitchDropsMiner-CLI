@@ -84,10 +84,12 @@ hiddenimports: list[str] = [
     # gnureadline — optional readline replacement on Linux/macOS.
     # Safe to include even if not installed (PyInstaller warns, doesn't error).
     "gnureadline",
-    # aiohttp.web — serves the login helper endpoints. Statically discoverable
-    # today, but the web app pulls its runner/response submodules in lazily.
+    # aiohttp.web — serves the browser sign-in page. Statically discoverable
+    # today, but the web app pulls its runner, response and websocket
+    # submodules in lazily.
     "aiohttp.web",
     "aiohttp.web_runner",
+    "aiohttp.web_ws",
 ]
 
 # ---------------------------------------------------------------------------

@@ -106,7 +106,8 @@ if __name__ == "__main__":
     from twitch import Twitch
     from settings import Settings
     from version import __version__
-    from exceptions import CaptchaRequired, ReloadRequest
+    from exceptions import CaptchaRequired, ReloadRequest, SignInRequired
+    from login_server import start_reason
     from utils import lock_file
     from constants import LOGGING_LEVELS, FILE_FORMATTER, LOG_DIR, LOCK_PATH
 
@@ -253,6 +254,17 @@ if __name__ == "__main__":
                 exit_status = 1
                 client.prevent_close()
                 client.print(_("error", "captcha"))
+            except SignInRequired as error:
+                # Not a crash: there is simply no way in from here, and the
+                # address to sign in at - or the reason there is not one - is
+                # what the user needs, not a traceback.
+                exit_status = 1
+                client.prevent_close()
+                client.print(
+                    _("cli", "signin", "required").format(
+                        reason=start_reason(error.reason)
+                    )
+                )
             except Exception:
                 exit_status = 1
                 client.prevent_close()

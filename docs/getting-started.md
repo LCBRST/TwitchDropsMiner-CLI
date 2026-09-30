@@ -1,7 +1,8 @@
 # Getting started
 
 Everything needed to go from nothing to mining drops, on a machine with no
-desktop.
+desktop — signing in is the one step that wants a screen, and `Xvfb` stands in
+for one where there is none.
 
 - [What this is](#what-this-is)
 - [Requirements](#requirements)
@@ -34,9 +35,9 @@ The mining engine is the upstream one and is not modified.
 | | |
 |---|---|
 | Python | 3.10 or newer (source install) |
-| OS | Linux, macOS, Windows — no display needed |
+| OS | Linux, macOS, Windows — no display needed, but signing in starts a browser, so a machine with no screen also needs `Xvfb` |
 | Network | outbound HTTPS to `twitch.tv`, `gql.twitch.tv`, `spade.twitch.tv` |
-| Browser | *only* for automatic login renewal — see [below](#keeping-the-login-alive) |
+| Browser | a Chromium-based one, for signing in and for automatic login renewal — see [below](#getting-the-full-campaign-list) |
 
 About 65 MB of RAM once it is mining, and no bandwidth beyond API traffic.
 
@@ -53,6 +54,27 @@ chmod +x ./TwitchDropsMiner-CLI_Linux && ./TwitchDropsMiner-CLI_Linux    # Linux
 ```
 ```powershell
 .\TwitchDropsMiner-CLI_Windows.exe                                     # Windows
+```
+
+### Linux, one command
+
+Fetches this script, runs it, done:
+
+```bash
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+chmod +x install_linux.sh
+./install_linux.sh
+```
+
+It installs what this program needs from the system (a Chromium-based browser, and
+`Xvfb` for a machine with no screen), downloads the source, builds a self-contained
+binary next to where you ran it, and then removes the source and the build
+environment again. What is left is the browser, `Xvfb`, and the binary.
+
+```
+./install_linux.sh --dry-run     # say what it would do, change nothing
+./install_linux.sh --dir ~/tdm   # install somewhere else
+./install_linux.sh --keep-source # leave the source and venv behind
 ```
 
 ### From source
@@ -77,9 +99,11 @@ python main.py              # interactive shell
 python main.py --no-shell   # no prompt, logs only (for a service)
 ```
 
-With no saved session the program starts a **device code login**: it prints a URL
-and a short code, you enter the code in a browser once, and the token is saved to
-`cookies.jar`. Nothing else is needed to start mining.
+With no saved session the program **opens a browser and waits for you to sign
+in**. That session is the only login that can see the whole catalogue, so it is
+the one worth doing - see
+[Getting the full campaign list](#getting-the-full-campaign-list) for where the
+window appears, and what to do on a machine with no screen.
 
 Then tell it what to mine:
 
@@ -101,68 +125,82 @@ login token was issued to, and it has closed that door for every client this
 program can log into on its own. Such a session can still mine whatever is
 already in progress, but it cannot discover new campaigns.
 
-The way around it is the **login helper**: a small program you run on a computer
-that has Google Chrome. It opens Chrome, lets you sign in normally, and hands the
-resulting browser session — which *can* see the full catalogue — to the miner.
+The way around it is to **sign in through a browser the miner starts itself**.
+It is a real browser, on the miner's own machine and address, so the session it
+ends up holding is one the miner can go on using. Nothing is handed over, and
+there is no second program to install.
 
-You only do this when the miner asks for it or when campaigns are missing.
-
-### 1. Open the endpoint
-
-In the miner's shell:
+You are offered this on a first run, and whenever the campaign list comes back
+short. To ask for it yourself:
 
 ```
-helper on
+login browser
 ```
 
-It prints something like:
+### If the miner has a screen
+
+A browser window opens **on the miner**, and that is the whole story:
 
 ```
-login helper: enabled
-listening on 0.0.0.0:8090
-from another machine: http://192.0.2.10:8090
-the helper runs on this machine: http://127.0.0.1:8090
-run it where Chrome is installed: tdm-login-helper --tdm http://192.0.2.10:8090
+a browser window has opened on this machine - sign in to Twitch there
 ```
 
-`0.0.0.0` is a *listening* address — nothing can connect to it. From another
-machine, use the address on the `from another machine` line. If the miner has
-more than one — a VPN, a container bridge — they are all listed, and one of them
-is a line reminding you to pick whichever the helper can reach.
+Sign in there, including any 2FA or email code. The window closes itself once the
+session is in.
 
-**The addresses above are an example.** Use the ones your own miner prints;
-`192.0.2.x` is a reserved documentation range that will never be your machine.
+### If it does not
 
-Allow the port through your firewall if you are connecting from elsewhere.
-
-### 2. Run the helper
-
-Download the login helper from
-[rangermix/TwitchDropsMiner releases](https://github.com/rangermix/TwitchDropsMiner/releases)
-— pick the archive matching the **desktop's** OS and CPU, not the miner's.
-
-```bash
-tdm-login-helper --tdm <miner-address>
-```
-
-Sign into Twitch in the Chrome window it opens, including any 2FA. Wait for it to
-report success; it then closes Chrome and deletes its temporary profile. Your
-normal Chrome profile is not touched.
-
-### 3. Check
+The miner prints addresses instead, one per way it can be reached:
 
 ```
-helper
+sign in at http://192.0.2.10:8090/login/xxxxxxxx
+on this machine: http://127.0.0.1:8090/login/xxxxxxxx
 ```
 
-should now show `imported session: active, expires ...`, and the miner's campaign
-count should jump to the full catalogue. It takes effect immediately — no restart.
+Open one from anywhere — a laptop, a phone. What you get is not a copy of Twitch
+in *your* browser: it is a live view of the browser running **on the miner**, with
+your mouse and keyboard going back into it. Click into the picture and use it as
+if you were sitting there. Pasting works too, which is how a password manager
+gets a password in.
 
-The endpoint then **closes itself** and prints a line saying so. It accepts
-credentials from anyone who can reach it, and nothing needs it once the session
-is in — renewal works from the stored session. That means a *later* helper run
-needs `helper on` again first; a session imported once lasts until renewal cannot
-keep up with it.
+On a headless Linux machine the miner starts `Xvfb` to be the screen the browser
+draws on. If `Xvfb` is missing it says so, rather than handing you an address
+that leads nowhere:
+
+```
+sudo apt install xvfb      # Debian/Ubuntu - use your distribution's package
+```
+
+**The `192.0.2.x` addresses above are examples.** Use the ones your own miner
+prints; `192.0.2.0/24` is a reserved documentation range that will never be your
+machine.
+
+Allow the port through your firewall if you are signing in from elsewhere.
+
+### Check
+
+```
+login status
+```
+
+should now show `imported session: active`, and the campaign count should jump to
+the full catalogue. It takes effect immediately — no restart.
+
+The page then **closes itself**. It is a way in, not a control panel, and nothing
+needs it once the session is in — renewal works from the stored session. A later
+sign-in needs `login browser` again.
+
+### Why it might not work
+
+Twitch is the only thing that can refuse this, and the one lever it gives you is
+consistency: it is fussier about a sign-in whose machine, clock and timezone do
+not match where the account normally signs in from. If the sign-in is rejected,
+set the machine's timezone correctly before anything else.
+
+`login device` logs in the old way, without a browser, for a machine that has
+none. It authenticates as a client that **cannot see the campaign list**, so it
+is a way to keep mining what is already in progress, not a way to discover
+anything.
 
 ## Keeping the login alive
 
@@ -173,8 +211,10 @@ before it lapses: it
 starts a temporary **headless** Chromium, replays the captured session into it,
 and lets the page mint a fresh proof, which is verified before being adopted.
 
-**This needs a Chromium-based browser on the machine running the miner.** Nothing
-else about the machine changes — no display, no desktop.
+**This needs a Chromium-based browser on the machine running the miner** — the
+same one signing in uses. Nothing else about the machine changes — no display, no
+desktop. (A machine that has no browser at all can still run on `login device`,
+which sees fewer campaigns.)
 
 - It finds `chromium` / `chrome` on `PATH`, then the usual install locations
   (including Edge on Windows).
@@ -185,18 +225,18 @@ else about the machine changes — no display, no desktop.
   set renewal_browser_path /usr/bin/google-chrome      # Linux and macOS
   ```
 
-- `helper` reports the state: `renewal: automatic, using ...`, or
+- `login status` reports the state: `renewal: automatic, using ...`, or
   `renewal: unavailable - <why>`.
 
 You can trigger a renewal on demand instead of waiting for the deadline:
 
 ```
-helper renew
+login renew
 ```
 
 If renewal keeps failing the miner does not break: it retries with a backoff,
 keeps using the current session, and falls back to `cookies.jar` once the session
-really expires. Run the helper again to get a fresh one.
+really expires. `login browser` gets a fresh one.
 
 ### Installing a browser on Linux
 
@@ -214,7 +254,7 @@ really expires. Run the helper again to get a fresh one.
 | No root at all | `pip install playwright && playwright install chromium` — puts a Chromium in your home directory, no system packages needed |
 
 Then check it: `google-chrome --version` (or `chromium --version`) should print a
-version, and `helper` should change to `renewal: automatic, using …`.
+version, and `login status` should change to `renewal: automatic, using …`.
 
 Running as root — inside a container, for instance — is handled for you: the
 browser is started with `--no-sandbox`, which Chromium requires in that case.
@@ -228,7 +268,7 @@ browser is started with `--no-sandbox`, which Chromium requires in that case.
 | Pause without quitting | `pause` / `resume` |
 | Pick a channel by hand | `watch <channel>` / `unwatch` |
 | Force a refresh | `reload` |
-| Check the login | `whoami`, `helper` |
+| Check the login | `whoami`, `login status` |
 
 ## Commands
 
@@ -237,7 +277,7 @@ browser is started with `--no-sandbox`, which Chromium requires in that case.
 **General** — `help [cmd]`, `status`, `version`, `log [N]`, `clear`,
 `exit` / `quit` / `q`
 
-**Login** — `whoami`, `login`, `helper [on|off|renew]`
+**Login** — `whoami`, `login [browser|status|cancel|renew|device]`
 
 **Mining** — `pause`, `resume`, `reload`, `watch <login>`, `unwatch`, `claim`
 
@@ -268,7 +308,7 @@ Everything lives next to the executable (or the repository root).
 |---|---|
 | `settings.json` | all settings |
 | `cookies.jar` | the saved login — **treat it as a password** |
-| `imported-session.json` | the session delivered by the login helper — **also a credential** |
+| `imported-session.json` | the session captured from the sign-in browser — **also a credential** |
 | `lock.file` | single-instance lock; safe to delete after a crash |
 | `log/` | timestamped logs plus command history |
 
@@ -330,21 +370,27 @@ Behind a proxy, either set `https_proxy` in the environment or use
 `proxy http://127.0.0.1:7890`. A transparent proxy on a router usually needs
 nothing beyond a higher `quality`.
 
-**The helper reports `SESSION_HELPER_NETWORK`.** It cannot reach the miner. Check
-that `helper` shows `enabled`, that the port is listening
-(`ss -ltnp | grep 8090` on Linux, `netstat -ano | findstr 8090` on Windows), that
-you used `127.0.0.1` rather than `0.0.0.0`, and that the firewall allows it.
-
-**The helper reports `SESSION_HELPER_REJECTED`.** The miner refused the session;
-the log line `Rejected an imported session: <code>` says why:
+**The sign-in page never fills in.** The browser on the miner did not start.
+Check `login status`, and the log for `The browser sign-in did not complete
+(<code>)`:
 
 | Code | |
 |---|---|
-| `FORMAT` / `IDENTITY` / `AUTH` | the captured session did not validate |
-| `ACCOUNT_MISMATCH` | the helper signed into a different account than the miner is using |
-| `CATALOG` | that session cannot read the campaign list |
+| `BROWSER_MISSING` | no Chromium-based browser on the machine — see [Installing a browser on Linux](#installing-a-browser-on-linux) |
+| `BROWSER_DISPLAY` | no display, and no `Xvfb` to stand in for one |
+| `BROWSER_START` | the browser was found but would not start: usually missing shared libraries, or a snap/flatpak wrapper |
+| `BROWSER_PROTOCOL` | the browser stopped answering |
+| `ACCOUNT_MISMATCH` | that sign-in was for a different account than the miner is using |
 
-**Renewal is unavailable.** Check the reason in `helper` output. The usual one is
+**The sign-in was refused.** Twitch rejected it — see
+[Why it might not work](#why-it-might-not-work). The log line `Twitch did not
+accept a captured login context (<code>)` says which step.
+
+**Nothing at all happens, and no address is printed.** The machine has a screen,
+so the miner opened a window there instead — look for it. `login status` always
+shows the address if you would rather sign in from elsewhere.
+
+**Renewal is unavailable.** Check the reason in `login status`. The usual one is
 that no Chromium-based browser was found — see
 [Keeping the login alive](#keeping-the-login-alive).
 
@@ -402,9 +448,10 @@ others:
   pipeline, websocket sharding, drop tracking and channel switching are all
   upstream work. Licensed MIT.
 - **[rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner)** —
-  the browser login helper and the integrity renewal design. The helper protocol,
-  the Kasada issuance approach and the keep-it-renewable idea all come from that
-  fork; this project implements the miner side of it.
+  the integrity renewal design: the idea of replaying a captured session into a
+  headless browser and letting Kasada's own script mint the next proof. This
+  project's renewal is that, and its browser sign-in grew out of the same
+  approach once that fork retired its desktop helper.
 - Twitch's drops system, and every contributor to the upstream project.
 
 ## License

@@ -107,7 +107,7 @@ LOCK_PATH = Path(WORKING_DIR, "lock.file")
 CACHE_PATH = Path(WORKING_DIR, "cache")
 CACHE_DB = Path(CACHE_PATH, "mapping.json")
 COOKIES_PATH = Path(WORKING_DIR, "cookies.jar")
-# Context captured by the desktop login helper; holds credentials, kept 0600.
+# Context captured from the sign-in browser; holds credentials, kept 0600.
 IMPORTED_SESSION_PATH = Path(WORKING_DIR, "imported-session.json")
 SETTINGS_PATH = Path(WORKING_DIR, "settings.json")
 # Typing

@@ -86,6 +86,20 @@ class CaptchaRequired(LoginException):
         super().__init__("Captcha is required")
 
 
+class SignInRequired(LoginException):
+    """
+    There is no session, and no browser to sign in with.
+
+    Raised instead of falling back to a login this app can complete by itself:
+    the client that flow authenticates as can only see a fraction of the
+    campaign list, so the session it produces looks healthy while quietly
+    mining almost nothing.
+    """
+    def __init__(self, reason: str):
+        self.reason: str = reason
+        super().__init__(f"A browser sign-in is required ({reason})")
+
+
 class GQLException(RequestException):
     """
     Raised when a GQL request returns an error response.

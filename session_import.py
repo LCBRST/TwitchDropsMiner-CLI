@@ -1,10 +1,10 @@
 """
-Imported browser session - the desktop login helper's captured request context.
+The imported browser session - a captured request context.
 
 Twitch gates the campaign catalog on the client an auth token was issued to, and
 no client this app can log into by itself receives it any more. A separate
-helper, run on a machine with a real browser, performs a genuine sign-in and
-captures the complete request context Twitch's own web client used: a WEB client
+browser this app starts performs a genuine sign-in and captures the complete
+request context Twitch's own web client used: a WEB client
 OAuth token together with a fresh ``Client-Integrity`` proof, the device id, the
 client session id and the exact user agent.
 
@@ -245,14 +245,6 @@ class ServerSeed:
 
     bundle: SessionBundle
     cookie: SDKCookie | None
-
-    @classmethod
-    def from_dict(cls, data: Any, *, now: float | None = None) -> ServerSeed:
-        """Parse the shape the helper uploads, where the cookie is required."""
-        seed = cls._parse(data, now=now)
-        if seed.cookie is None:
-            raise SessionImportError("SDK_SEED")
-        return seed
 
     @classmethod
     def from_stored(cls, data: Any, *, now: float | None = None) -> ServerSeed:

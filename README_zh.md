@@ -26,7 +26,7 @@
 自动发现活动、自动切换频道、持久化登录、自动领取、自动开始停止。
 
 这个分支加的：交互式 shell，运行中随时改设置；`pause` / `resume` / `reload`；
-手动指定频道；输出对管道友好；以及**浏览器登录助手** —— 拿回完整的活动列表，并且自动续签。
+手动指定频道；输出对管道友好；以及**自己起浏览器的登录** —— 拿回完整的活动列表，并且自动续签。
 
 ## 安装
 
@@ -59,8 +59,8 @@ python main.py              # 交互式 shell
 python main.py --no-shell   # 不给提示符，只打日志
 ```
 
-没有已保存的登录信息时，程序会让你走一次设备码登录（打印一个网址和一个短码，输一次即可），
-登录信息存进 `cookies.jar`。然后：
+没有已保存的登录信息时，miner 会自己起一个浏览器等你登录 —— 有显示器的机器上窗口就开在那里，
+没有的话打印一个网址，从任何地方打开都能登。然后：
 
 ```
 priority add <游戏名>   # 想挂什么
@@ -70,17 +70,18 @@ resume                  # 开始
 ### 如果看不到活动
 
 Twitch 只让部分登录类型看到活动目录，而程序自己能签发的那些已经不在其中了。
-解决办法是**登录助手**：在一台有 Chrome 的机器上跑一次，把一份能看到完整目录的会话交给 miner，
-之后 miner 会自动续签。
+**`login browser`** 会在 miner 本机起一个真浏览器，并留下它捕获到的会话 ——
+这份会话能看到完整目录，之后 miner 会自动续签。
 
 ```
-helper on     # 然后在桌面上对着打印出的地址跑 tdm-login-helper
-helper        # 查看已导入的会话和续签状态
-helper renew  # 不等它到期，立刻续一次
+login browser  # 用 miner 自己起的浏览器登录
+login status   # 查看已导入的会话和续签状态
+login renew    # 不等它到期，立刻续一次
 ```
 
 完整流程见 **[docs/getting-started.zh-CN.md](docs/getting-started.zh-CN.md)**。
-自动续签需要 miner 那台机器上有个 Chromium 系浏览器 —— 不用显示器。
+登录和自动续签都需要 miner 那台机器上有个 Chromium 系浏览器 —— 不用显示器，
+但无屏幕的机器还要装 `Xvfb` 给浏览器当屏幕。
 
 ## 命令
 
@@ -89,7 +90,7 @@ helper renew  # 不等它到期，立刻续一次
 | | |
 |---|---|
 | `status` `version` `log [N]` `clear` `exit` | 通用 |
-| `whoami` `login` `helper [on\|off\|renew]` | 登录 |
+| `whoami` `login [browser\|status\|cancel\|renew\|device]` | 登录 |
 | `pause` `resume` `reload` `watch <频道>` `unwatch` `claim` | 挂机控制 |
 | `inventory`(`inv`) `campaigns` `drops` | 进度 |
 | `channels [--all]` `online` | 频道 |
@@ -116,7 +117,7 @@ helper renew  # 不等它到期，立刻续一次
 |---|---|
 | `settings.json` | 全部设置 |
 | `cookies.jar` | 保存的登录信息 —— **当密码对待** |
-| `imported-session.json` | 登录助手交付的会话 —— **同样是凭据** |
+| `imported-session.json` | 从登录浏览器捕获的会话 —— **同样是凭据** |
 | `log/` | 按时间戳命名的日志和命令历史 |
 | `lock.file` | 单实例锁 |
 
@@ -133,7 +134,7 @@ helper renew  # 不等它到期，立刻续一次
 - **[DevilXD/TwitchDropsMiner](https://github.com/DevilXD/TwitchDropsMiner)** ——
   原版程序，以及本分支跑着的整套挂机引擎。
 - **[rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner)** ——
-  浏览器登录助手和 integrity 续签方案；本项目做的是这套协议的 miner 一侧。
+  integrity 续签方案：把捕获到的会话重放进无头浏览器，让 Kasada 自己的脚本签下一份新证明。
 
 ## 许可证
 

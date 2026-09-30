@@ -2,14 +2,16 @@
 A temporary Chromium this app owns, driven over the DevTools protocol.
 
 Twitch's SDK issues the integrity proof from inside a real browser, so renewal
-needs one. The browser is started per renewal, on a throwaway profile, and is
-never attached to - the profile and the listening socket belong to this process
-and are cleaned up with it.
+needs one; so does signing in, which is why the browser can also be started
+with a window. Either way it is a throwaway profile of our own, never the
+user's browser, and the profile and the listening socket are cleaned up with
+it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -18,7 +20,7 @@ import shutil
 import signal
 import sys
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Protocol
@@ -81,14 +83,33 @@ def find_browser(explicit: str = "") -> str | None:
 class DevToolsConnection:
     """Multiplexes CDP command replies and the few network events we care about."""
 
-    def __init__(self, socket_: Any, *, extra_events: frozenset[str] = frozenset()):
+    def __init__(
+        self, socket_: Any, *, extra_events: frozenset[str] = frozenset(),
+        drop_oldest: bool = False,
+    ):
         self.socket = socket_
         self.extra_events = extra_events
+        # An interactive session produces events far faster than a slow viewer
+        # renders them, and a stale frame is worth nothing. Dropping the oldest
+        # keeps that stream alive, where tearing the connection down once the
+        # queue fills - the right answer for renewal, which must see everything
+        # - would end the session the user is in the middle of.
+        self.drop_oldest = drop_oldest
         self._sequence = 0
         self._pending: dict[int, asyncio.Future] = {}
         self.events: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=256)
         self._requests: set[str] = set()
         self._reader = asyncio.create_task(self._receive())
+
+    def _offer(self, event: dict[str, Any]) -> bool:
+        """Queue an event. False means the connection can no longer be trusted."""
+        if self.events.full():
+            if not self.drop_oldest:
+                return False
+            with suppress(asyncio.QueueEmpty):
+                self.events.get_nowait()
+        self.events.put_nowait(event)
+        return True
 
     async def _receive(self) -> None:
         try:
@@ -112,9 +133,8 @@ class DevToolsConnection:
                 # Extra events are not request-scoped and carry no requestId, so
                 # they have to be queued before any of that is looked at.
                 if method in self.extra_events:
-                    if self.events.full():
+                    if not self._offer(data):
                         break
-                    self.events.put_nowait(data)
                     continue
                 request_id = params.get("requestId")
                 if method == "Network.requestWillBeSent":
@@ -135,9 +155,8 @@ class DevToolsConnection:
                     self._requests.discard(request_id)
                 else:
                     self._requests.add(request_id)
-                if len(self._requests) > 256 or self.events.full():
+                if len(self._requests) > 256 or not self._offer(data):
                     break
-                self.events.put_nowait(data)
         except (aiohttp.ClientError, ValueError, TypeError):
             pass
         finally:
@@ -153,9 +172,18 @@ class DevToolsConnection:
         sequence = self._sequence
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[sequence] = future
-        try:
+
+        async def send_and_wait() -> Any:
             await self.socket.send_json({"id": sequence, "method": method, "params": params or {}})
-            return await asyncio.wait_for(future, timeout)
+            return await future
+
+        try:
+            # The send is inside the timeout too, deliberately. A browser that
+            # has stopped reading its own debugging socket fills the write
+            # buffer, and sending then blocks forever - a command that never
+            # returns is far worse than one that fails, because there is nothing
+            # to report and nothing to retry.
+            return await asyncio.wait_for(send_and_wait(), timeout)
         finally:
             self._pending.pop(sequence, None)
 
@@ -201,6 +229,7 @@ def local_endpoint(address: str, value: str, *, target_id: str | None = None) ->
 @asynccontextmanager
 async def browser_target(
     address: str, *, extra_events: frozenset[str] = frozenset(),
+    drop_oldest: bool = False,
 ) -> AsyncIterator[DevToolsConnection]:
     """Open a page target, hand it over, and close only that target."""
     target_id = None
@@ -218,7 +247,9 @@ async def browser_target(
                 endpoint, max_msg_size=MAX_MESSAGE_BYTES,
                 timeout=aiohttp.ClientWSTimeout(ws_close=2),
             ) as socket_:
-                protocol = DevToolsConnection(socket_, extra_events=extra_events)
+                protocol = DevToolsConnection(
+                    socket_, extra_events=extra_events, drop_oldest=drop_oldest
+                )
                 try:
                     yield protocol
                 finally:
@@ -238,10 +269,22 @@ async def browser_target(
 class OwnedChromium:
     """Own a temporary profile and process group; never attach to a user's browser."""
 
-    def __init__(self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 20):
+    def __init__(
+        self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 20,
+        headless: bool = True, extra_args: Sequence[str] = (),
+        env: Mapping[str, str] | None = None, profile_prefix: str = "tdm-renew-",
+    ):
         self.executable: str = executable
         self.no_sandbox: bool = no_sandbox
         self.startup_timeout: float = startup_timeout
+        # Renewal mints a proof and never needs a window; an interactive login
+        # is the opposite - a visible page is the whole point, and a headless
+        # one is exactly what Twitch's risk checks look for.
+        self.headless: bool = headless
+        self.extra_args: Sequence[str] = tuple(extra_args)
+        # Only used to hand a child a DISPLAY; otherwise it inherits ours.
+        self.env: Mapping[str, str] | None = env
+        self.profile_prefix: str = profile_prefix
 
     async def _poll_ready(self, process: asyncio.subprocess.Process, profile: Path) -> str:
         while process.returncode is None:
@@ -336,7 +379,7 @@ class OwnedChromium:
         # lag behind its own exit - a cleanup failure there must not turn into a
         # renewal failure.
         with tempfile.TemporaryDirectory(
-            prefix="tdm-renew-", ignore_cleanup_errors=True,
+            prefix=self.profile_prefix, ignore_cleanup_errors=True,
         ) as directory:
             profile = Path(directory)
             # Port zero, deliberately: naming the port ourselves makes Chrome
@@ -345,17 +388,23 @@ class OwnedChromium:
             # also the only case where Chrome writes DevToolsActivePort, which
             # is how the real port is discovered.
             args = [
-                self.executable, "--headless=new", f"--user-data-dir={profile}",
+                self.executable, f"--user-data-dir={profile}",
                 "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
                 "--no-first-run", "--no-default-browser-check", "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled", "about:blank",
+                "--disable-blink-features=AutomationControlled",
+                *(() if self.headless else ("--window-size=1280,900", "--window-position=0,0")),
+                *self.extra_args,
+                "about:blank",
             ]
+            if self.headless:
+                args.insert(1, "--headless=new")
             if self.no_sandbox:
                 args.insert(1, "--no-sandbox")
             try:
                 process = await asyncio.create_subprocess_exec(
                     *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
                     start_new_session=os.name == "posix",
+                    **({} if self.env is None else {"env": {**os.environ, **self.env}}),
                 )
                 try:
                     address = await self.wait_ready(process, profile)

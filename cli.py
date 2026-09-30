@@ -1008,9 +1008,9 @@ class CLIManager:
                 )
                 # Campaign discovery depends on a session this app cannot mint
                 # for itself, and that is the one thing a new install trips over.
-                if not self._twitch.settings.helper_server_enabled:
+                if not self._twitch.settings.login_server_enabled:
                     log_buffer.text += (
-                        _("cli", "commands", "welcome_helper") + "\n\n"
+                        _("cli", "commands", "welcome_signin") + "\n\n"
                     )
                 self._twitch.settings.welcome_shown = True
                 self._twitch.settings.save()

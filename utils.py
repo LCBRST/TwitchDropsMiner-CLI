@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import json
+import socket
 import random
 import string
 import asyncio
@@ -307,6 +308,77 @@ def webopen(url: URL | str):
             os.environ.pop(ld_env)
     else:
         webbrowser.open_new_tab(url_str)
+
+
+# Addresses a wildcard listener cannot be dialled at, but the bind is valid.
+WILDCARD_HOSTS = frozenset({"", "0.0.0.0", "::", "[::]"})
+
+
+def primary_ipv4() -> str | None:
+    """
+    The address the routing table would use for outbound traffic.
+
+    Connecting a UDP socket sends nothing; it only asks which local address
+    would be used. On a single-homed host this is the right answer.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("192.0.2.1", 9))  # TEST-NET-1, reserved and unroutable
+            address = sock.getsockname()[0]
+    except OSError:
+        return None
+    return address or None
+
+
+def _linux_interfaces() -> list[str]:
+    """
+    Every address assigned to a local interface, in interface order.
+
+    Resolving the hostname usually yields only one of them, which is not enough
+    on a host with several - a LAN address, a VPN, container bridges. The kernel
+    lists them all here, each address line followed by its route type.
+    """
+    try:
+        with open("/proc/net/fib_trie", encoding="ascii", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return []
+    found: list[str] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"\s*\|--\s+(\d+\.\d+\.\d+\.\d+)\s*$", line)
+        if match is None:
+            continue
+        following = lines[index + 1] if index + 1 < len(lines) else ""
+        # "host LOCAL" marks an address of this machine, as opposed to a route.
+        if "host LOCAL" in following and match.group(1) not in found:
+            found.append(match.group(1))
+    return found
+
+
+def local_ipv4_addresses() -> list[str]:
+    """
+    Every IPv4 address this host might be reachable at, most likely first.
+
+    A machine can have several - LAN, VPN, a container bridge - and which of
+    them another machine can reach depends on where that machine is, which this
+    process cannot know. So they are all offered, rather than one presented as
+    fact. Loopback is left out; the caller offers it separately.
+    """
+    found: list[str] = []
+    primary = primary_ipv4()
+    if primary is not None and not primary.startswith("127."):
+        found.append(primary)
+    for address in _linux_interfaces():
+        if not address.startswith("127.") and address not in found:
+            found.append(address)
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = info[4][0]
+            if not address.startswith("127.") and address not in found:
+                found.append(address)
+    except OSError:
+        pass
+    return found
 
 
 class ExponentialBackoff:

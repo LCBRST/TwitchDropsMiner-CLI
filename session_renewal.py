@@ -63,12 +63,12 @@ UNAVAILABLE_LOGS = {
     "no-session": "no session has been imported yet",
     "no-sdk-cookie": (
         "the imported session has no SDK cookie, so it cannot be renewed -"
-        " run the login helper again"
+        " sign in again"
     ),
     "no-browser": "no Chromium-based browser was found on this machine",
     "sdk-expired": (
         "the stored SDK cookie has expired, so it cannot be renewed -"
-        " run the login helper again"
+        " sign in again"
     ),
     "not-running": "the renewal task is not running",
 }
@@ -314,7 +314,7 @@ class SessionRenewal:
 
     RENEW_BEFORE = 300.0
     # How long to wait before looking at the stored session again, when there is
-    # nothing to renew (no helper login yet, or no SDK cookie to renew with).
+    # nothing to renew (no sign-in yet, or no SDK cookie to renew with).
     IDLE_POLL = 60.0
     # A session is worth renewing for a long time; failures step back rather than
     # hammering Twitch.
@@ -448,7 +448,7 @@ class SessionRenewal:
             except SessionImportError as error:
                 self.last_error = error.code
                 if error.code in ("SDK_EXPIRED", "SDK_SEED"):
-                    # Nothing left to renew from; wait for a new helper login.
+                    # Nothing left to renew from; wait for a new sign-in.
                     self._set_unavailable("sdk-expired")
                     await self._wait(self.IDLE_POLL)
                     continue

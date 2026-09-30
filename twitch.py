@@ -29,6 +29,7 @@ from exceptions import (
     RequestInvalid,
     CaptchaRequired,
     RequestException,
+    SignInRequired,
 )
 from utils import (
     CHARS_HEX_LOWER,
@@ -57,8 +58,9 @@ from constants import (
     CLIENT_TYPE_PREFERENCE,
     IMPORTED_SESSION_PATH,
 )
-from helper_server import HelperServer
+from login_server import LoginEndpoint, start_reason
 from browser_cdp import find_browser
+from browser_login import has_display, has_visible_display
 from session_renewal import SessionRenewal
 from session_import import (
     PrivateSessionFile,
@@ -90,7 +92,7 @@ SAFE_LOADS = lambda s: json.loads(s, cls=SkipExtraJsonDecoder)
 
 class _ImportReady(MinerException):
     """
-    Raised out of the device code login when a helper delivers a session.
+    Raised out of the device code login when a sign-in delivers a session.
 
     Intended for internal use only.
     """
@@ -109,7 +111,7 @@ class _AuthState:
         self.session_id: str
         self.access_token: str
         self.client_version: str
-        # Imported browser session, if one was delivered by the login helper. It
+        # Imported browser session, if one has been captured. It
         # replaces the cookie session for as long as it is fresh; see
         # `_use_imported` and `_deactivate_imported`.
         self._imported_file = PrivateSessionFile(IMPORTED_SESSION_PATH)
@@ -119,7 +121,7 @@ class _AuthState:
         # refused is left alone until it does.
         self._imported_key: tuple[int, int] | None = None
         self._imported_refused: tuple[int, int] | None = None
-        # Set when a helper installs a session, so a device code login in flight
+        # Set when a sign-in installs a session, so a device code login in flight
         # can give way instead of making the user wait for the code to expire.
         self._import_pending = asyncio.Event()
 
@@ -270,13 +272,44 @@ class _AuthState:
         self._import_pending.clear()
 
     async def _sleep_or_import(self, delay: float) -> None:
-        # A helper delivering a session mid-login should take effect now, not
-        # after the device code expires.
+        # A session arriving mid-login should take effect now, not after the
+        # device code expires.
         try:
             await asyncio.wait_for(self._import_pending.wait(), timeout=delay)
         except asyncio.TimeoutError:
             return
         raise _ImportReady()
+
+    # How often a wait for a sign-in checks that one is still in progress.
+    SIGN_IN_POLL = 5.0
+    # How long to keep waiting when no sign-in is running at all - long enough
+    # to read why, put it right and type `login browser`. A sign-in that *is*
+    # running is never cut short this way; it ends on its own terms.
+    SIGN_IN_GRACE = 600.0
+
+    async def _wait_for_sign_in(self) -> None:
+        """
+        Wait for the browser sign-in instead of logging in without one.
+
+        The only client this app can authenticate as by itself sees a fraction
+        of the campaign list, so its session is worse than none: it looks
+        healthy while quietly mining only what was already in progress.
+
+        Returns only when `login device` has been asked for; otherwise it either
+        keeps waiting or gives up with a reason. Waiting is interruptible, so a
+        session arriving at any moment is picked up at once.
+        """
+        idle_since: float | None = None
+        while True:
+            if self._twitch.device_login_requested:
+                return
+            if self._twitch.sign_in_pending:
+                idle_since = None
+            elif idle_since is None:
+                idle_since = time()
+            elif time() - idle_since >= self.SIGN_IN_GRACE:
+                raise SignInRequired(self._twitch.sign_in_reason or "not-running")
+            await self._sleep_or_import(self.SIGN_IN_POLL)
 
     async def _oauth_login(self) -> str:
         login_form = self._twitch.gui.login
@@ -558,7 +591,7 @@ class _AuthState:
                 await self._validate_once()
                 return
             except _ImportReady:
-                # The device code login was interrupted by a helper delivering a
+                # The device code login was interrupted by a sign-in delivering a
                 # session; start over so it is picked up.
                 logger.info("Restarting login with the newly imported session")
                 self.clear()
@@ -592,6 +625,10 @@ class _AuthState:
             cookie = jar.filter_cookies(client_info.CLIENT_URL)
             self.device_id = cookie["unique_id"].value
         if not self._hasattrs("access_token", "user_id"):
+            # A browser on this machine is the only way to a session that can
+            # read the campaign catalog, so offer one now - it takes a minute of
+            # the user's time, and the fallback below is already waiting.
+            await self._twitch.offer_browser_login()
             # looks like we're missing something
             login_form = self._twitch.gui.login
             logger.info("Checking login")
@@ -601,6 +638,16 @@ class _AuthState:
                 for invalid_token_attempt in range(2):
                     cookie = jar.filter_cookies(client_info.CLIENT_URL)
                     if not use_saved_token or "auth-token" not in cookie:
+                        # Nothing saved to fall back on, so this is where the
+                        # device code used to run. It cannot see the campaign
+                        # list, and someone who signs in with a browser gets
+                        # nothing out of it but a second browser window - so it
+                        # waits for that sign-in instead. `login device` sets
+                        # the flag this returns on, but it has to be asked for.
+                        await self._wait_for_sign_in()
+                        if not self._twitch.device_login_requested:
+                            continue
+                        self._twitch.device_login_requested = False
                         self.access_token = await self._oauth_login()
                         cookie["auth-token"] = self.access_token
                     elif not hasattr(self, "access_token"):
@@ -676,11 +723,15 @@ class Twitch:
         # that identity must not be accompanied by the saved login's cookies.
         self._imported_session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
-        self._helper_server: HelperServer | None = None
+        self._login_endpoint: LoginEndpoint | None = None
+        # Why the last attempt to open a browser sign-in could not be made.
+        self._sign_in_failure: str | None = None
+        # Set by `login device` to ask for the login this app can do by itself.
+        self.device_login_requested: bool = False
         # Keeps the imported session's integrity proof alive; started per run.
         self._renewal: SessionRenewal | None = None
-        # Deferred shutdown of the helper endpoint after a session is imported.
-        self._helper_close_task: asyncio.Task | None = None
+        # Deferred shutdown of the sign-in endpoint after a session is in.
+        self._login_close_task: asyncio.Task | None = None
         # Re-installs an imported session that was just stored or renewed.
         self._adopt_task: asyncio.Task | None = None
         if os.environ.get("TDM_GUI") == "1":
@@ -755,50 +806,140 @@ class Twitch:
         )
         return self._session
 
-    async def _start_helper_server(self) -> None:
-        """Open the login helper endpoints, if they are enabled."""
-        if self._helper_server is not None:
-            return
-        if not self.settings.helper_server_enabled:
-            return
-        server = HelperServer(
-            host=self.settings.helper_server_host,
-            port=self.settings.helper_server_port,
-            on_accepted=self._on_helper_accepted,
-            enabled=lambda: self.settings.helper_server_enabled,
-            expected_user_id=self._expected_helper_user_id,
+    async def _start_login_endpoint(self) -> bool:
+        """
+        Open the sign-in endpoint, if it is enabled.
+
+        Returns whether it is listening afterwards, so a caller that needs it
+        can tell the user why it is not rather than printing a URL that leads
+        nowhere.
+        """
+        if self._login_endpoint is not None:
+            return True
+        if not self.settings.login_server_enabled:
+            return False
+        endpoint = LoginEndpoint(
+            host=self.settings.login_server_host,
+            port=self.settings.login_server_port,
+            on_accepted=self._on_session_accepted,
+            enabled=lambda: self.settings.login_server_enabled,
+            expected_user_id=self._expected_login_user_id,
+            on_finished=self._on_login_finished,
         )
         try:
-            await server.start()
+            await endpoint.start()
         except OSError as exc:
             # A busy port must not keep the miner from running: it still has the
             # saved login, and Windows keeps a port in TIME_WAIT across the quick
             # restart the watchdog performs.
             logger.warning(
-                f"Could not listen on {server.bind_address} for the login helper"
-                f" ({exc}) - importing a session is unavailable"
+                f"Could not listen on {endpoint.bind_address} for the browser"
+                f" sign-in ({exc}) - it is unavailable"
             )
-            return
-        self._helper_server = server
-        # Just the one line here: the addresses are a block, and printing them on
-        # every start would drown out everything else. `helper` shows them.
-        self.print(_("cli", "commands", "helper_started"))
+            return False
+        self._login_endpoint = endpoint
+        return True
 
-    async def apply_helper_settings(self) -> None:
+    async def apply_login_settings(self) -> None:
         """Make the running endpoint match the setting."""
-        if self.settings.helper_server_enabled:
-            await self._start_helper_server()
-        elif self._helper_server is not None:
-            await self._helper_server.stop()
-            self._helper_server = None
+        if self.settings.login_server_enabled:
+            await self._start_login_endpoint()
+        elif self._login_endpoint is not None:
+            await self._login_endpoint.stop()
+            self._login_endpoint = None
+
+    async def start_browser_login(self) -> str | None:
+        """
+        Open a browser on this machine and wait for a sign-in.
+
+        Returns None on success, or a short code saying why it could not start
+        - which the caller turns into something readable. Starting a second one
+        while the first is still open is not an error; it just reports the same
+        browser.
+        """
+        endpoint = self._login_endpoint
+        if endpoint is not None and endpoint.login is not None:
+            return None
+        executable = find_browser(self.settings.renewal_browser_path)
+        if executable is None:
+            return self._sign_in_failed("no_browser")
+        if not has_display():
+            return self._sign_in_failed("no_display")
+        if endpoint is None:
+            # Nothing is listening yet, and the whole point is a URL to open.
+            self.settings.login_server_enabled = True
+            self.settings.save()
+            if not await self._start_login_endpoint():
+                return self._sign_in_failed("bind_failed")
+            endpoint = self._login_endpoint
+        if endpoint is None:
+            return self._sign_in_failed("bind_failed")
+        try:
+            await endpoint.begin(executable)
+        except SessionImportError as error:
+            return self._sign_in_failed(error.code)
+        self._sign_in_failure = None
+        self._announce_login_urls(endpoint)
+        return None
+
+    def _sign_in_failed(self, reason: str) -> str:
+        """Remember why no sign-in could be opened, so it can be reported later."""
+        self._sign_in_failure = reason
+        return reason
+
+    @property
+    def sign_in_pending(self) -> bool:
+        """Whether a browser sign-in is running and could still deliver."""
+        endpoint = self._login_endpoint
+        login = endpoint.login if endpoint is not None else None
+        return login is not None and login.state not in ("failed", "captured")
+
+    @property
+    def sign_in_reason(self) -> str | None:
+        """Why no sign-in is running, as a short code, or None if one is."""
+        endpoint = self._login_endpoint
+        if endpoint is None or endpoint.login is None:
+            return self._sign_in_failure or "not-running"
+        return endpoint.login.detail
+
+    def _announce_login_urls(self, endpoint: LoginEndpoint) -> None:
+        """
+        Say where to sign in: the window here, or an address to open elsewhere.
+
+        On a machine the user is sitting at there is nothing to say but that -
+        the window is in front of them, and an address as well is a step they
+        should not have to take. Only where nobody can see this machine is the
+        sign-in page the way in, and then the address is the whole answer.
+        """
+        if has_visible_display():
+            self.print(_("cli", "signin", "window_opened"))
+            return
+        # Every address the host answers on is offered, because which one works
+        # depends on where the person signing in is - and the one they are most
+        # likely to want first is the one this machine would use to reach out.
+        urls = endpoint.urls
+        if urls:
+            self.print(_("cli", "signin", "started").format(url=urls[0]))
+            for url in urls[1:]:
+                self.print(_("cli", "signin", "started_alt").format(url=url))
+        loopback = endpoint.loopback_url
+        if loopback is not None:
+            self.print(_("cli", "signin", "started_local").format(url=loopback))
+        # Logged as well as printed. These addresses are the only way in on a
+        # machine nobody can see, and a console is a poor place to keep the only
+        # copy: it scrolls, it is not there at all under `--no-shell`, and a line
+        # wider than the terminal can have its tail painted over. `log/` holds
+        # the whole thing, and it is where troubleshooting already points.
+        for url in [*urls, *(() if loopback is None else (loopback,))]:
+            logger.info(f"Sign in at {url}")
 
     def _start_renewal(self) -> None:
         """
         Start keeping the imported session alive.
 
-        Independent of the helper endpoint: the helper only delivers sessions,
-        while renewal continues from what is already stored, so the endpoint can
-        stay closed.
+        Independent of the sign-in endpoint: that only delivers sessions, while
+        renewal continues from what is already stored, so the endpoint can stay
+        closed.
         """
         if self._renewal is not None:
             return
@@ -808,7 +949,7 @@ class Twitch:
         )
         self._renewal.start()
 
-    def _expected_helper_user_id(self) -> int | None:
+    def _expected_login_user_id(self) -> int | None:
         """The account an incoming session must belong to, if one is in use."""
         if self._auth_state._hasattrs("user_id"):
             return self._auth_state.user_id
@@ -827,8 +968,13 @@ class Twitch:
         auth_state._imported_key = None
         auth_state._imported_refused = None
         auth_state._import_pending.set()
-        if auth_state.imported_active and auth_state._hasattrs("access_token", "user_id"):
-            # Replace the context in use rather than waiting for it to expire.
+        if auth_state._hasattrs("access_token", "user_id"):
+            # Replace whatever is in use rather than waiting for it to expire.
+            # This has to happen for a saved login too, not just an imported one:
+            # the stored session is only read when the auth state is empty, so
+            # anything left here would sit unread until the next restart. And a
+            # saved login is exactly the state someone is in when they are told
+            # the campaign list is missing and sign in to fix it.
             auth_state.clear()
             auth_state._imported_active = False
             self._client_type = CLIENT_TYPE
@@ -837,7 +983,7 @@ class Twitch:
         # Re-install immediately. The clear above only marks that the session must
         # be read again, and that read happens in `_validate` - which is driven by
         # GQL requests. On an idle miner those can be an hour apart, and until one
-        # arrives `helper` reports no session at all even though the file is fine.
+        # arrives `login status` reports no session at all even though the file
         self._adopt_task = asyncio.create_task(self._readopt_imported())
 
     async def _readopt_imported(self) -> None:
@@ -848,39 +994,78 @@ class Twitch:
         except Exception:
             logger.exception("Could not re-install the imported session")
 
-    def _on_helper_accepted(self, user_id: int) -> None:
-        self._adopt_imported(user_id, "The login helper delivered a session")
+    # Failure codes that have something worth saying, as translation keys.
+    LOGIN_FAILURE_KEYS = {
+        "LOGIN_CANCELLED": "cancelled",
+        "LOGIN_TIMEOUT": "timeout",
+        "LOGIN_CLOSED": "closed",
+        "ACCOUNT_MISMATCH": "account_mismatch",
+        "BROWSER_DISPLAY": "no_display",
+        "BROWSER_START": "no_browser",
+        "BROWSER_MISSING": "no_browser",
+    }
+
+    def _on_login_finished(self, state: str, detail: str | None) -> None:
+        """Report an attempt that ended without a session."""
+        key = self.LOGIN_FAILURE_KEYS.get(detail or "", "failed")
+        self.print(_("cli", "signin", key).format(detail=detail or "?"))
+
+    async def offer_browser_login(self) -> None:
+        """
+        Put a way to sign in in front of the user, without waiting for it.
+
+        This runs alongside the saved login rather than instead of it: that one
+        is the fallback for a machine with no browser to drive, and whichever
+        finishes first wins - the device code flow gets out of the way on its
+        own once a session lands.
+        """
+        endpoint = self._login_endpoint
+        if endpoint is not None and endpoint.login is not None:
+            return
+        reason = await self.start_browser_login()
+        if reason is not None:
+            self.print(start_reason(reason))
+            logger.info(f"Browser sign-in is unavailable ({reason})")
+
+    def _on_session_accepted(self, user_id: int) -> None:
+        self._adopt_imported(user_id, "The browser sign-in delivered a session")
         if self._renewal is not None:
             # A newly imported session replaces whatever was being renewed.
             self._renewal.notify_changed()
-        self._close_helper_endpoint()
+        self._close_login_endpoint()
+        self.print(_("cli", "signin", "captured"))
 
-    # How long the endpoint keeps answering after a session is in, so a helper
-    # whose acknowledgement was lost can still read the receipt. Its retry loop
-    # runs for up to a minute.
-    HELPER_GRACE = 90.0
+    # How long the endpoint keeps answering after a session is in. The page is
+    # still open in someone's browser, and tearing the socket out from under it
+    # looks like a failure right at the moment it succeeded.
+    LOGIN_GRACE = 15.0
 
-    def _close_helper_endpoint(self) -> None:
+    def _close_login_endpoint(self) -> None:
         """
         Turn the endpoint off now that it has done its job.
 
-        It accepts credentials from anyone who can reach it, and nothing needs it
-        afterwards: renewal reads the stored session, not this. The setting is
-        saved immediately so a restart cannot reopen it, but the server itself is
-        stopped from a separate task - shutting a server down from inside one of
-        its own handlers would wait on itself.
+        Anyone who can reach it can drive a browser that is signed in, and
+        nothing needs it afterwards: renewal reads the stored session, not this.
+        The setting is saved immediately so a restart cannot reopen it, but the
+        server itself is stopped from a separate task - shutting a server down
+        from inside one of its own handlers would wait on itself.
         """
-        if not self.settings.helper_server_enabled:
+        if not self.settings.login_server_enabled:
             return
-        self.settings.helper_server_enabled = False
+        self.settings.login_server_enabled = False
         self.settings.save()
 
         async def close_later() -> None:
-            await asyncio.sleep(self.HELPER_GRACE)
-            await self.apply_helper_settings()
-            self.print(_("cli", "commands", "helper_autoclosed"))
+            await asyncio.sleep(self.LOGIN_GRACE)
+            await self.apply_login_settings()
+            self.print(_("cli", "signin", "autoclosed"))
 
-        self._helper_close_task = asyncio.create_task(close_later())
+        # A second sign-in re-enables the endpoint, so there can be one of these
+        # already waiting; letting it fire would close the new attempt and say
+        # the old one had finished.
+        if self._login_close_task is not None and not self._login_close_task.done():
+            self._login_close_task.cancel()
+        self._login_close_task = asyncio.create_task(close_later())
 
     def _on_session_renewed(self, user_id: int) -> None:
         self._adopt_imported(user_id, "Renewed the imported session")
@@ -901,15 +1086,21 @@ class Twitch:
         self._renewal.request_renewal()
         return None
 
-    def helper_status(self) -> JsonType:
+    def login_status(self) -> JsonType:
         auth_state = self._auth_state
         bundle = auth_state._imported
         renewal = self._renewal
+        endpoint = self._login_endpoint
+        login = endpoint.login if endpoint is not None else None
         return {
-            "enabled": bool(self.settings.helper_server_enabled),
-            "addresses": list(self._helper_server.addresses) if self._helper_server else [],
-            "bind": self._helper_server.bind_address if self._helper_server is not None else None,
-            "loopback": self._helper_server.loopback if self._helper_server is not None else None,
+            "enabled": bool(self.settings.login_server_enabled),
+            "listening": endpoint is not None,
+            "addresses": list(endpoint.addresses) if endpoint is not None else [],
+            "bind": endpoint.bind_address if endpoint is not None else None,
+            "loopback": endpoint.loopback if endpoint is not None else None,
+            "urls": list(endpoint.urls) if endpoint is not None else [],
+            "login_state": login.state if login is not None else "idle",
+            "login_detail": login.detail if login is not None else None,
             "active": auth_state.imported_active,
             "expires_at": bundle.expires_at if bundle is not None else None,
             "path": str(IMPORTED_SESSION_PATH),
@@ -984,15 +1175,15 @@ class Twitch:
         if self._adopt_task is not None:
             self._adopt_task.cancel()
             self._adopt_task = None
-        if self._helper_close_task is not None:
-            self._helper_close_task.cancel()
-            self._helper_close_task = None
+        if self._login_close_task is not None:
+            self._login_close_task.cancel()
+            self._login_close_task = None
         if self._renewal is not None:
             await self._renewal.stop()
             self._renewal = None
-        if self._helper_server is not None:
-            await self._helper_server.stop()
-            self._helper_server = None
+        if self._login_endpoint is not None:
+            await self._login_endpoint.stop()
+            self._login_endpoint = None
         if self._watching_task is not None:
             self._watching_task.cancel()
             self._watching_task = None
@@ -1116,9 +1307,9 @@ class Twitch:
         """
         self.gui.start()
         # Opened before logging in: the device code flow blocks for as long as it
-        # takes the user to approve it, and the helper delivering a session is one
+        # takes the user to approve it, and a browser sign-in arriving is one
         # of the ways out of it.
-        await self._start_helper_server()
+        await self._start_login_endpoint()
         self._start_renewal()
         auth_state = await self.get_auth()
         await self.websocket.start()
@@ -1997,8 +2188,9 @@ class Twitch:
             logger.warning(
                 f"The campaigns API returned no campaigns for the {self._client_type.NAME}"
                 f" client - campaign discovery is not working. Only campaigns already in"
-                f" progress can be mined; a different saved session may restore the rest."
+                f" progress can be mined; signing in with `login browser` restores the rest."
             )
+            self.print(_("cli", "commands", "catalog_missing"))
         applicable_statuses = ("ACTIVE", "UPCOMING")
         available_campaigns: dict[str, JsonType] = {
             c["id"]: c

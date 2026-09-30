@@ -12,7 +12,7 @@ a container, over SSH, or on a Raspberry Pi.
 
 | | |
 |---|---|
-| 🚀 [Getting started](Getting-started) | install, first run, the login helper, running it as a service |
+| 🚀 [Getting started](Getting-started) | install, first run, signing in with a browser, running it as a service |
 | 🚀 [入门指南](Getting-started.zh-CN) | 上面那篇的中文版 |
 | 📦 [Releases](https://github.com/LCBRST/TwitchDropsMiner-CLI/releases) | prebuilt binaries |
 | 📖 [README](https://github.com/LCBRST/TwitchDropsMiner-CLI#readme) | the short version |
@@ -24,17 +24,19 @@ program can mint for itself no longer qualify. A session like that can still min
 whatever is already in progress, but it cannot discover new campaigns — you will
 see only a handful of entries.
 
-A small **login helper**, run once on a machine with Google Chrome, hands over a
-session that can see everything. From then on the miner renews it by itself.
+**`login browser`** starts a browser on the miner's own machine and keeps the
+session it captures — one that can see everything. From then on the miner renews
+it by itself.
 See [Getting started](Getting-started#getting-the-full-campaign-list).
 
 ## Keeping it working
 
 That session renews itself whenever Twitch's proof is about to lapse — sometimes
-within the hour — using a headless browser on the machine running the miner. No
-display is needed, but **a Chromium-based browser has to be installed there** —
-Chrome, Chromium or Edge. Run `helper` to see the state, or `helper renew` to
-force one now.
+within the hour — using a headless browser on the machine running the miner. That
+means **a Chromium-based browser has to be installed there** — Chrome, Chromium or
+Edge — and `Xvfb` as well on a machine with no screen, for the browser window
+signing in opens. Run `login status` to see the state, or `login renew` to force
+one now.
 
 See [Keeping the login alive](Getting-started#keeping-the-login-alive) for the
 per-distribution install commands.
@@ -50,7 +52,8 @@ account.
 - [DevilXD/TwitchDropsMiner](https://github.com/DevilXD/TwitchDropsMiner) — the
   original app and the entire mining engine.
 - [rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner) —
-  the browser login helper and the integrity renewal design.
+  the integrity renewal design: replaying a captured session into a headless
+  browser so Kasada's own script mints the next proof.
 
 ## License
 

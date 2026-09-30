@@ -22,6 +22,7 @@ from yarl import URL
 
 from constants import State, PriorityMode
 from exceptions import ExitRequest, ReloadRequest
+from login_server import start_reason
 from translate import _
 
 if TYPE_CHECKING:
@@ -116,9 +117,8 @@ class CommandRegistry:
             Command("version", _cmd_version),
             Command("about", _cmd_about),
 
-            Command("login", _cmd_login),
             Command("whoami", _cmd_whoami),
-            Command("helper", _cmd_helper, usage="helper [on|off|renew]"),
+            Command("login", _cmd_login, usage="login [browser|status|cancel|renew]"),
 
             Command("pause", _cmd_pause),
             Command("resume", _cmd_resume),
@@ -273,7 +273,137 @@ async def _cmd_about(ctx: CommandContext) -> None:
 # Login ---------------------------------------------------------------------
 
 async def _cmd_login(ctx: CommandContext) -> None:
-    ctx.cli.print(_("cli", "commands", "login_hint"))
+    """
+    Sign in through a browser, or see how the session is holding up.
+
+    A session captured from a real browser is the only thing that can read the
+    full campaign catalog, and that browser runs on the miner itself: this opens
+    it and prints an address to drive it from wherever the user happens to be.
+    """
+    if not ctx.args:
+        ctx.cli.print(_("cli", "commands", "login_hint"))
+        _login_status_block(ctx)
+        return
+    target = ctx.args[0].lower()
+    if target == "browser":
+        await _login_browser(ctx)
+    elif target == "status":
+        _login_status_block(ctx)
+    elif target == "cancel":
+        _login_cancel(ctx)
+    elif target == "device":
+        # Kept, but never reached on its own any more: the client this logs in
+        # as cannot see the campaign list, so it is only worth having if the
+        # machine has no browser to sign in with at all.
+        _login_device(ctx)
+    elif target == "renew":
+        # Renewal is normally hours away, which is far too long to wait to find
+        # out whether it works.
+        reason = ctx.twitch.request_renewal()
+        if reason is None:
+            ctx.cli.print(_("cli", "commands", "login_renew_requested"))
+        else:
+            ctx.cli.print(
+                _("cli", "commands", "login_renew_unavailable").format(
+                    reason=_renewal_reason(reason)
+                )
+            )
+    else:
+        ctx.cli.print(_("cli", "commands", "login_usage"))
+
+
+async def _login_browser(ctx: CommandContext) -> None:
+    endpoint = ctx.twitch._login_endpoint
+    if endpoint is not None and endpoint.login is not None:
+        ctx.cli.print(_("cli", "commands", "login_already_open"))
+        return
+    # The addresses are printed as part of starting it, so the automatic start
+    # on a first run says exactly the same thing this does.
+    reason = await ctx.twitch.start_browser_login()
+    if reason is not None:
+        ctx.cli.print(
+            _("cli", "commands", "login_unavailable").format(reason=start_reason(reason))
+        )
+
+
+def _login_device(ctx: CommandContext) -> None:
+    """
+    Ask for the old login, deliberately.
+
+    Only worth having on a machine with no browser to sign in with: the client
+    this logs in as cannot see the campaign list, so the miner will spend its
+    time on whatever was already in progress.
+    """
+    auth_state = ctx.twitch._auth_state
+    if auth_state._hasattrs("access_token", "user_id"):
+        ctx.cli.print(_("cli", "commands", "login_device_already"))
+        return
+    ctx.cli.print(_("cli", "commands", "login_device_warning"))
+    # The waiting login loop picks this up within a couple of seconds; doing the
+    # flow here would set a token without the verification that completes it.
+    ctx.twitch.device_login_requested = True
+
+
+def _login_cancel(ctx: CommandContext) -> None:
+    endpoint = ctx.twitch._login_endpoint
+    login = endpoint.login if endpoint is not None else None
+    if login is None:
+        ctx.cli.print(_("cli", "commands", "login_nothing_to_cancel"))
+        return
+    login.cancel()
+    ctx.cli.print(_("cli", "commands", "login_cancelling"))
+
+
+def _login_status_block(ctx: CommandContext) -> None:
+    cli = ctx.cli
+    status = ctx.twitch.login_status()
+    state = status["login_state"]
+    if state == "failed":
+        state = _("cli", "commands", "login_state_failed").format(
+            detail=status["login_detail"]
+        )
+    else:
+        state = _("cli", "commands", f"login_state_{state}")
+    cli.print_raw(_("cli", "commands", "login_state").format(state=state))
+    if status["listening"]:
+        cli.print_raw(_("cli", "commands", "login_endpoint_on").format(bind=status["bind"]))
+        for index, url in enumerate(status["urls"]):
+            cli.print_raw(
+                _("cli", "commands", "login_address" if index == 0 else "login_address_alt")
+                .format(address=url)
+            )
+        if len(status["addresses"]) > 1:
+            cli.print_raw(_("cli", "commands", "login_address_hint"))
+    else:
+        cli.print_raw(_("cli", "commands", "login_endpoint_off"))
+    expires_at = status["expires_at"]
+    if status["active"] and expires_at is not None:
+        cli.print_raw(
+            _("cli", "commands", "login_session_active").format(
+                remaining=_short_duration(expires_at - time.time()),
+                expires=_local_time(expires_at),
+            )
+        )
+    else:
+        cli.print_raw(_("cli", "commands", "login_session_none"))
+    reason = status["renewal_unavailable"]
+    browser = status["browser"]
+    if reason is None and browser:
+        renewal = _("cli", "commands", "login_renewal_auto").format(browser=browser)
+    else:
+        renewal = _("cli", "commands", "login_renewal_off").format(
+            reason=_renewal_reason(reason)
+        )
+    cli.print_raw(_("cli", "commands", "login_renewal").format(state=renewal))
+    if status["renewal_error"]:
+        cli.print_raw(
+            _("cli", "commands", "login_renewal_error").format(code=status["renewal_error"])
+        )
+    if status["renewed_at"]:
+        cli.print_raw(
+            _("cli", "commands", "login_renewed").format(when=_local_time(status["renewed_at"]))
+        )
+    cli.print_raw(_("cli", "commands", "login_session_path").format(path=status["path"]))
 
 
 async def _cmd_whoami(ctx: CommandContext) -> None:
@@ -316,11 +446,11 @@ def _local_time(stamp: float) -> str:
 # Renewal reports a short reason code; each one has a whole sentence of its own so
 # a translation can be phrased properly rather than glued onto a fragment.
 _RENEWAL_REASONS = {
-    "no-session": "helper_unavailable_no_session",
-    "no-sdk-cookie": "helper_unavailable_no_sdk_cookie",
-    "no-browser": "helper_unavailable_no_browser",
-    "sdk-expired": "helper_unavailable_sdk_expired",
-    "not-running": "helper_unavailable_not_running",
+    "no-session": "login_unavailable_no_session",
+    "no-sdk-cookie": "login_unavailable_no_sdk_cookie",
+    "no-browser": "login_unavailable_no_browser",
+    "sdk-expired": "login_unavailable_sdk_expired",
+    "not-running": "login_unavailable_not_running",
 }
 
 
@@ -330,113 +460,9 @@ def _renewal_reason(code: str | None) -> str:
     if key is None:
         # Never show a bare code, and never raise on a code this build does not
         # know - a newer one could always turn up.
-        return _("cli", "commands", "helper_unavailable_unknown")
+        return _("cli", "commands", "login_unavailable_unknown")
     return _("cli", "commands", key)
 
-
-async def _cmd_helper(ctx: CommandContext) -> None:
-    """
-    Show or change the login helper endpoint.
-
-    A session captured from a real browser is the only thing that can read the
-    full campaign catalog, so this is how it gets in.
-    """
-    settings = _settings(ctx)
-    if ctx.args:
-        target = ctx.args[0].lower()
-        if target == "renew":
-            # Renewal is normally hours away, which is far too long to wait to
-            # find out whether it works.
-            reason = ctx.twitch.request_renewal()
-            if reason is None:
-                ctx.cli.print(_("cli", "commands", "helper_renew_requested"))
-            else:
-                ctx.cli.print(
-                    _("cli", "commands", "helper_renew_unavailable").format(
-                        reason=_renewal_reason(reason)
-                    )
-                )
-            return
-        if target not in ("on", "off"):
-            ctx.cli.print(_("cli", "commands", "helper_usage"))
-            return
-        enable = target == "on"
-        if bool(settings.helper_server_enabled) != enable:
-            settings.helper_server_enabled = enable
-            settings.save()
-        await ctx.twitch.apply_helper_settings()
-        # No confirmation line: the status block below already leads with the
-        # state, and saying it twice reads badly.
-    status = ctx.twitch.helper_status()
-    ctx.cli.print_raw(
-        _("cli", "commands", "helper_state").format(
-            state=_(
-                "cli", "commands",
-                "helper_state_on" if status["enabled"] else "helper_state_off",
-            )
-        )
-    )
-    addresses = status["addresses"]
-    if addresses:
-        ctx.cli.print_raw(
-            _("cli", "commands", "helper_bind").format(bind=status["bind"])
-        )
-        for index, address in enumerate(addresses):
-            ctx.cli.print_raw(
-                _(
-                    "cli", "commands",
-                    "helper_reachable" if index == 0 else "helper_reachable_alt",
-                ).format(address=address)
-            )
-        if len(addresses) > 1:
-            ctx.cli.print_raw(_("cli", "commands", "helper_multi_hint"))
-        ctx.cli.print_raw(
-            _("cli", "commands", "helper_same_machine").format(address=status["loopback"])
-        )
-        ctx.cli.print_raw(
-            _("cli", "commands", "helper_run_hint").format(address=addresses[0])
-        )
-    elif status["enabled"]:
-        ctx.cli.print_raw(_("cli", "commands", "helper_bind_failed"))
-    else:
-        ctx.cli.print_raw(_("cli", "commands", "helper_not_listening"))
-    expires_at = status["expires_at"]
-    if status["active"] and expires_at is not None:
-        ctx.cli.print_raw(
-            _("cli", "commands", "helper_session_active").format(
-                remaining=_short_duration(expires_at - time.time()),
-                expires=_local_time(expires_at),
-            )
-        )
-    else:
-        ctx.cli.print_raw(_("cli", "commands", "helper_session_none"))
-    reason = status["renewal_unavailable"]
-    browser = status["browser"]
-    if reason is None and browser:
-        state = _("cli", "commands", "helper_renewal_auto").format(browser=browser)
-    else:
-        state = _("cli", "commands", "helper_renewal_off").format(
-            reason=_renewal_reason(reason)
-        )
-    ctx.cli.print_raw(_("cli", "commands", "helper_renewal").format(state=state))
-    if status["renewal_error"]:
-        ctx.cli.print_raw(
-            _("cli", "commands", "helper_renewal_error").format(
-                code=status["renewal_error"]
-            )
-        )
-    if status["renewed_at"]:
-        ctx.cli.print_raw(
-            _("cli", "commands", "helper_renewed").format(
-                when=_local_time(status["renewed_at"])
-            )
-        )
-    ctx.cli.print_raw(
-        _("cli", "commands", "helper_session_path").format(path=status["path"])
-    )
-
-
-# Mining control ------------------------------------------------------------
 
 async def _cmd_pause(ctx: CommandContext) -> None:
     ctx.twitch.stop_watching()
@@ -817,7 +843,7 @@ _GETTABLE_KEYS = (
     "priority", "exclude", "priority_mode", "language", "proxy",
     "connection_quality", "reload_interval", "tray_notifications",
     "enable_badges_emotes", "available_drops_check", "dark_mode", "autostart_tray",
-    "helper_server_enabled", "helper_server_host", "helper_server_port",
+    "login_server_enabled", "login_server_host", "login_server_port",
     "renewal_browser_path", "welcome_shown",
 )
 

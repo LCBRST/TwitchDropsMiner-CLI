@@ -18,17 +18,17 @@ They are not stylistic preferences.
    minted or replaced. If it seems broken, leave it and report.
 3. **Never put either credential file in a git repository, an archive you hand
    over, a paste site, or a log you share.**
-4. **Do not start the program interactively on a machine with a desktop unless
-   the user expects it.** With no saved session it prints a device code and calls
-   `webbrowser.open_new_tab`, which pops a browser window on the user's screen.
-5. **Never invent, remember or copy the address for the login helper.** Read it
-   from the miner's own `helper on` output. Every address in this file is an
-   illustration (`192.0.2.0/24` is reserved for documentation), so none of them
-   can be used as-is. `0.0.0.0` is a bind address and nothing can connect to
-   it; see [step 5](#step-5-the-login-helper).
-6. **Ask before enabling `helper_server_enabled` on a machine reachable from an
-   untrusted network.** While it is on, anyone who can reach the port can install
-   a Twitch session of their own choosing.
+4. **Do not start the program on a machine with a desktop unless the user
+   expects a browser window to open.** With no saved session it opens one for
+   them to sign in at, which pops up on their screen.
+5. **Never invent, remember or copy the sign-in address.** It carries a one-off
+   token and is printed by the miner itself; read it from there. Every address in
+   this file is an illustration (`192.0.2.0/24` is reserved for documentation),
+   so none of them can be used as-is. `0.0.0.0` is a bind address and nothing can
+   connect to it; see [step 5](#step-5-signing-in).
+6. **Ask before enabling `login_server_enabled` on a machine reachable from an
+   untrusted network.** While it is on, anyone who can reach the port and has the
+   token can drive a browser that is signed in.
 7. Do not modify `gui.py`, the engine in `twitch.py`, or `cookies.jar` handling to
    "make something work". Report the blocker instead.
 
@@ -38,13 +38,13 @@ They are not stylistic preferences.
 |---|---|
 | Language / entry point | Python 3.10+, `main.py` |
 | Runtime deps | `aiohttp`, `yarl`, `prompt_toolkit`, `truststore` |
-| No display needed | yes, for everything except one optional step |
+| No display needed | no - signing in opens a browser window, and where there is no screen the miner starts `Xvfb` to be one |
 | **Data directory** | **the folder containing `main.py` (source) or the executable (build)** — not the current working directory |
 | Files it creates there | `settings.json`, `cookies.jar`, `imported-session.json`, `lock.file`, `log/` |
-| Listeners it opens | none by default; one TCP port only when the login helper is enabled |
+| Listeners it opens | none by default; one TCP port while a sign-in is open, and only where nobody can see the miner's screen |
 | Release builds | Linux and Windows; **no macOS binary** |
 | Upstream | DevilXD/TwitchDropsMiner (the mining engine) |
-| Helper protocol | rangermix/TwitchDropsMiner (the login helper binary) |
+| Sign-in | a headful Chromium the miner starts itself; the user drives it directly, or through a page it serves |
 
 The data-directory rule matters: the program resolves it from `sys.argv[0]`. If
 you launch it from somewhere else, the settings and login still live next to the
@@ -82,17 +82,20 @@ truststore` is a smaller, equivalent install for this build.
 
 ## Step 2: first run
 
-Start it. Do this on a machine where a browser window is acceptable, or expect
-the device code flow:
+Start it. Do this on a machine where a browser window is acceptable — with no
+saved session, one opens:
 
 ```bash
 python main.py               # interactive shell
 python main.py --no-shell    # no prompt, logs only — use this for a service
 ```
 
-With no saved session it prints a URL and a short code, and asks the user to enter
-the code at that URL. This is the *baseline* login. It is enough to mine, but it
-will not see the full campaign catalogue — see step 4.
+With no saved session it opens a browser and waits for the user to sign in. On a
+machine with a screen the window is right there; on one without, it prints an
+address to open from elsewhere (see [step 5](#step-5-signing-in)).
+
+**The user is the only one who can complete this** — there is no login an agent
+can perform on their behalf. If they are not available, stop and say so.
 
 Confirm it is running:
 
@@ -118,7 +121,7 @@ The counters that matter:
 **A working install keeps advancing the drop progress.** Nothing else proves it;
 "no errors" does not.
 
-## Step 4: decide whether the login helper is needed
+## Step 4: decide whether the login can see the catalogue
 
 Read the campaign count:
 
@@ -129,8 +132,8 @@ campaigns
 | What you see | Meaning | Action |
 |---|---|---|
 | Around a hundred or more | the login can see the catalogue | skip to [step 6](#step-6-keep-the-login-alive) |
-| A handful - single digits, and they are the ones already in progress | **the login cannot see the catalogue** | do [step 5](#step-5-the-login-helper) |
-| Log contains `campaign discovery is not working` | same as above | do [step 5](#step-5-the-login-helper) |
+| A handful - single digits, and they are the ones already in progress | **the login cannot see the catalogue** | do [step 5](#step-5-signing-in) |
+| Log contains `campaign discovery is not working` | same as above | do [step 5](#step-5-signing-in) |
 
 This is the single most common deployment problem, and it is not a bug.
 
@@ -139,71 +142,84 @@ The clients this program can log into by itself no longer qualify. Such a sessio
 still mines whatever is already in progress, so the failure looks like a healthy
 miner with a suspiciously short list.
 
-## Step 5: the login helper
+## Step 5: signing in
 
-Only do this if the user can run something on a machine with **Google Chrome
-installed**. If they cannot, stop here and tell them the campaign catalogue will
-stay limited; do not attempt a workaround.
+This is the fix for a login that cannot see the catalogue, and it is the one step
+that needs the user. Everything else here an agent can do alone.
 
-Three pieces, on two machines:
-
-| Where | What |
-|---|---|
-| the miner | this program, with the helper endpoint enabled |
-| the desktop with Chrome | the `tdm-login-helper` binary from [rangermix/TwitchDropsMiner releases](https://github.com/rangermix/TwitchDropsMiner/releases) — pick the archive matching **the desktop's** OS and CPU, not the miner's |
-
-### 5a. Enable the endpoint on the miner
-
-Set the setting, then restart the program (or run the command):
+The browser runs **on the miner**, not on the machine the user is sitting at, so
+the session it produces is one the miner can go on using. Nothing is handed over
+between machines, and there is nothing to install anywhere.
 
 ```
-helper on
+login browser
 ```
 
-Expected:
+### If the miner has a screen
+
+The browser window opens on it and that is the whole story. The miner prints:
 
 ```
-login helper: enabled
-listening on 0.0.0.0:8090
-from another machine: http://192.0.2.10:8090
-the helper runs on this machine: http://127.0.0.1:8090
-run it where Chrome is installed: tdm-login-helper --tdm http://192.0.2.10:8090
+a browser window has opened on this machine - sign in to Twitch there
 ```
 
-**Hand the helper one of the `from another machine` addresses** (or `127.0.0.1`
-when it runs on the miner itself). `listening on 0.0.0.0` is a bind address and
-connecting to it fails with `SESSION_HELPER_NETWORK`.
+Tell the user to sign in there, including any 2FA or email code. The window closes
+itself once the session is in.
 
-When the host has several addresses — a VPN, a container bridge — all of them are
-listed, with a line saying to use whichever the helper can reach. Do not assume
-the first one is right, and do not skip that check on a multi-homed host.
+### If it does not
 
-Make sure the port is allowed through the firewall if the helper is on another
-machine.
-
-### 5b. Run the helper on the desktop
-
-```bash
-tdm-login-helper --tdm <miner-address>
-```
-
-The human signs into Twitch in the Chrome window it opens, including 2FA. The
-helper then uploads the session and cleans up. Its temporary Chrome profile is
-separate from the user's own.
-
-### 5c. Confirm the import
+The miner prints one address per way it can be reached:
 
 ```
-helper
+sign in at http://192.0.2.10:8090/login/xxxxxxxx
+on this machine: http://127.0.0.1:8090/login/xxxxxxxx
+```
+
+**Hand the user one of those addresses, exactly as printed** — the long random
+part is a one-off token and is the only thing that makes the page work. What they
+see is not Twitch rendered in their own browser: it is a live view of the miner's
+browser, with their mouse and keyboard going back into it. They click into the
+picture and use it as if they were sitting at the miner. Pasting works, which is
+how a password manager gets a password in.
+
+`0.0.0.0` is a bind address and connecting to it fails. When the host has several
+addresses — a VPN, a container bridge — all of them are listed; do not assume the
+first one is right, and do not skip that check on a multi-homed host. Make sure
+the port is allowed through the firewall.
+
+On a headless Linux host the miner starts `Xvfb` to be the screen the browser
+draws on. If it is missing, the miner says so instead of printing an address that
+leads nowhere:
+
+```
+sudo apt install xvfb      # Debian/Ubuntu; use the distribution's own package
+```
+
+### Confirm it
+
+```
+login status
 ```
 
 Expected, and effective immediately with no restart:
 
 ```
-imported session: active, expires 2026-09-28 10:00:00
+browser sign-in: done
+imported session: active
 ```
 
-Then re-check `campaigns` — it should jump to the full catalogue.
+Then re-check `campaigns` — it should jump to the full catalogue. The page closes
+itself shortly afterwards; that is normal and not a failure.
+
+### If it does not work
+
+Twitch is the only thing that can refuse this. It is fussier about a sign-in whose
+machine, clock and timezone do not match where the account normally signs in
+from — check the timezone first, and do not promise the user a duration.
+
+`login device` logs in without a browser, for a machine that has none. It
+authenticates as a client that **cannot see the catalogue**, so it keeps existing
+mining going and discovers nothing. Do not reach for it as a workaround.
 
 ## Step 6: keep the login alive
 
@@ -220,7 +236,7 @@ Requirements and checks:
 | Required | a Chromium-based browser on the **miner's** machine |
 | Auto-detected | `chromium` / `chrome` on `PATH`, then platform install locations (including Edge on Windows) |
 | Override | `set renewal_browser_path /path/to/chrome` |
-| Status | the `helper` command shows `renewal: automatic, using …` or `renewal: unavailable - <reason>` |
+| Status | `login status` shows `renewal: automatic, using …` or `renewal: unavailable - <reason>` |
 | **Installing one on Linux** | see the table below |
 | On Ubuntu 20.04+ | **`apt install chromium` gives you a snap wrapper and will not work.** So does flatpak |
 
@@ -237,17 +253,17 @@ exist; pick the one matching the host.
 | No root available | `pip install playwright && playwright install chromium` — installs a Chromium under the user's home directory |
 
 Verify with `google-chrome --version` (or `chromium --version`), then re-run
-`helper` and confirm it no longer says renewal is unavailable. Running as root is
+`login status` and confirm it no longer says renewal is unavailable. Running as root is
 handled: the browser is started with `--no-sandbox`, which Chromium requires in
 that case.
 
 Force one now instead of waiting for the deadline:
 
 ```
-helper renew
+login renew
 ```
 
-Then re-run `helper` after ~15 seconds and look for a `last renewed:` line. The
+Then re-run `login status` after ~15 seconds and look for a `last renewed:` line. The
 log will contain `Renewed the imported session, valid for another …`.
 
 **Renewal failing is not fatal.** The miner retries with a backoff and keeps using
@@ -297,8 +313,8 @@ A deployment is done when all of these hold:
 - [ ] `whoami` reports a user id.
 - [ ] `campaigns` reports a realistic count, not single digits.
 - [ ] `drops` shows a campaign and its progress **increases over a few minutes**.
-- [ ] `helper` shows `imported session: active` (if step 5 was needed).
-- [ ] `helper` shows `renewal: automatic` (if the session must outlive the
+- [ ] `login status` shows `imported session: active` (if step 5 was needed).
+- [ ] `login status` shows `renewal: automatic` (if the session must outlive the
       current proof).
 - [ ] `log/` contains no repeating error.
 
@@ -306,51 +322,59 @@ A deployment is done when all of these hold:
 
 Match on the exact string. Do not guess.
 
-Every error the login helper itself reports is printed as
-`Login error code: SESSION_HELPER_<reason>` — grep for `SESSION_HELPER_` to find
-it, and match the suffix below.
+Two lines carry every code. The sign-in one is printed by the miner as it runs:
+
+```
+The browser sign-in did not complete (<code>)
+```
+
+and a capture Twitch refused is logged as `Twitch did not accept a captured login
+context (<code>)`.
 
 | Symptom | Cause | Action |
 |---|---|---|
 | `Cannot connect to Twitch` | timeouts too tight for the link | `quality 2`, then restart |
-| single-digit `campaigns`, or `campaign discovery is not working` | the login cannot see the catalogue | [step 5](#step-5-the-login-helper) |
-| `Unable to obtain a device code` | Twitch closed that client's device flow | switch `CLIENT_TYPE` in `constants.py` to another `ClientType` entry that still allows it, or use the helper |
-| helper: `SESSION_HELPER_NETWORK` | cannot reach the miner | check `helper` says `enabled`; the port is listening (`ss -ltnp \| grep 8090` on Linux, `netstat -ano \| findstr 8090` on Windows); the address is one of the listed ones or `127.0.0.1`, **not** `0.0.0.0`; if the host has several, try each; firewall |
-| helper: `SESSION_HELPER_DISABLED` | endpoint not enabled | `helper on` |
-| helper: `SESSION_HELPER_CHROME_MISSING` | Chrome is not installed on the desktop | install Chrome there, or pass `--chrome <path>` to the helper |
-| helper: `SESSION_HELPER_LOGIN_TIMEOUT` | nobody finished signing in before the ticket lapsed | run the helper again |
-| helper: `SESSION_HELPER_EXPIRED` / `SESSION_HELPER_RESPONSE` | the ticket lapsed or the response was malformed | run the helper again |
-| helper: `SESSION_HELPER_RESULT_UNKNOWN` | the network dropped after the session may have been installed | check `helper` in the miner **before** retrying — the session may already be in |
-| helper: `SESSION_HELPER_REJECTED` | the miner refused the session | read the miner log for `Rejected an imported session: <code>` — see below |
-| log: `Rejected an imported session: FORMAT/IDENTITY/AUTH` | the captured session did not validate | run the helper again; if it repeats, the capture is broken — report it |
-| log: `Rejected an imported session: ACCOUNT_MISMATCH` | the helper signed into a different account than the miner is using | either run the helper against the same account, or delete `imported-session.json` and restart to switch |
-| log: `Rejected an imported session: CATALOG` | that session cannot read the catalogue | run the helper again |
-| `renewal: unavailable - no session has been imported yet` | nothing imported | expected before step 5 |
-| `renewal: unavailable - the imported session has no SDK cookie, so it cannot be renewed - run the login helper again` | the stored session predates renewal | run the helper again |
+| single-digit `campaigns`, or `campaign discovery is not working` | the login cannot see the catalogue | [step 5](#step-5-signing-in) |
+| `Unable to obtain a device code` | that client's device flow is closed — only reachable through `login device` | sign in with a browser instead, via [step 5](#step-5-signing-in) |
+| `BROWSER_MISSING` | no Chromium-based browser on the miner | install one — see [step 6](#step-6-keep-the-login-alive) |
+| `BROWSER_DISPLAY` | no display, and no `Xvfb` to stand in for one | `sudo apt install xvfb`, or the distribution's equivalent |
+| `BROWSER_START` | the browser was found but would not start | on a minimal server, usually missing shared libraries; a snap or flatpak wrapper does this too |
+| `BROWSER_PROTOCOL` | the browser stopped answering | retry `login browser`; if it repeats, report it |
+| `bind_failed` | the port is already taken | another instance is probably running, or `login_server_port` collides — `netstat -ano \| findstr 8090` on Windows, `ss -ltnp \| grep 8090` on Linux |
+| `LOGIN_TIMEOUT` | nobody finished signing in in time | retry when the user is ready |
+| `LOGIN_CANCELLED` | cancelled from the page, or by `login cancel` | retry if that was not intended |
+| `LOGIN_CLOSED` | the browser closed before the sign-in finished | retry |
+| `ACCOUNT_MISMATCH` | that sign-in was for a different account than the miner is using | sign in as the account the miner already uses, or start from a clean `imported-session.json` to switch |
+| log: `Twitch did not accept a captured login context: AUTH` / `IDENTITY` | the captured token did not validate | retry; if it repeats, report it |
+| log: `Twitch did not accept a captured login context: CATALOG` | that context cannot read the catalogue | retry the sign-in |
+| log: `Could not reach Twitch to check a captured login context` | the probe timed out | **not** a rejection — the sign-in keeps waiting and retries by itself |
+| `The browser sign-in failed` with a traceback | an unexpected error | report the traceback |
+| `renewal: unavailable - no session has been imported yet` | nothing has been captured | expected before step 5 |
+| `renewal: unavailable - the imported session has no SDK cookie, so it cannot be renewed - sign in again` | the stored session predates renewal | sign in again |
 | `renewal: unavailable - no Chromium-based browser was found on this machine` | no browser on the miner | install one, or `set renewal_browser_path …` |
-| `renewal: unavailable - the stored SDK cookie has expired, so it cannot be renewed - run the login helper again` | the SDK cookie lapsed | run the helper again |
+| `renewal: unavailable - the stored SDK cookie has expired, so it cannot be renewed - sign in again` | the SDK cookie lapsed | sign in again |
 | `renewal: unavailable - the renewal task is not running` | the renewal task is not active | report it |
+| `The imported session stopped working (…)` | the proof expired and renewal did not keep up | it has already fallen back to `cookies.jar`; sign in again |
+| `Login verification failure` at startup | the saved token is unusable | do **not** delete `cookies.jar`; report it, and sign in with a browser again |
 
-These are the log strings, which is what `log/` contains. The `helper`
-command shows the same reasons translated into the user's language.
-
-| `The imported session stopped working (…)` | the proof expired and renewal did not keep up | it has already fallen back to `cookies.jar`; run the helper again |
-| `Login verification failure` at startup | the saved token is unusable | do **not** delete `cookies.jar`; report it, and use the helper to log in again |
+These are the log strings, which is what `log/` contains. `login status` shows the
+same reasons translated into the user's language.
 
 ## Things that are easy to get wrong
 
 - **`0.0.0.0` is not connectable.** It is what the endpoint binds to.
 - **The data directory follows the program file, not the shell's cwd.** See
   [Facts](#facts).
-- **`--no-shell` does not mean "no login".** It only suppresses the prompt.
-- **Do not run the helper on a machine without Chrome**, and do not run it over
-  SSH into the miner — it must drive the desktop's own Chrome.
+- **`--no-shell` does not mean "no login".** It only suppresses the prompt — with
+  no session it will still open a browser, and on a host with no screen that
+  means `Xvfb` has to be installed.
+- **The browser has to run on the miner.** It cannot be pointed at the user's own
+  browser: the session has to be born where it will be used.
 - **Do not watch streams with the same Twitch account while mining.** Progress is
   counted per account and the two interfere.
 - **The endpoint is a standing risk while it is open**, so it closes itself once a
-  session is accepted (after a short grace period, so a helper whose
-  acknowledgement was lost can still read its receipt). A later helper run needs
-  `helper on` again - do not be surprised by `SESSION_HELPER_DISABLED` then.
+  session is in. A later sign-in reopens it by itself - there is no command to
+  turn it on, and none is needed.
 
 ## Reference
 
@@ -362,9 +386,9 @@ persisted to `settings.json`:
 
 | Key | Default | |
 |---|---|---|
-| `helper_server_enabled` | `false` | opens the login helper endpoint |
-| `helper_server_host` | `0.0.0.0` | bind address |
-| `helper_server_port` | `8090` | |
+| `login_server_enabled` | `false` | serves the sign-in page; turned on by itself when a sign-in is asked for |
+| `login_server_host` | `0.0.0.0` | bind address |
+| `login_server_port` | `8090` | |
 | `renewal_browser_path` | `""` | empty means auto-detect |
 | `quality` | `1` | connection timeout multiplier; the `quality` command accepts `0..2` |
 | `proxy` | empty | or set `https_proxy` in the environment |
