@@ -46,7 +46,6 @@ CommandFn = Callable[[CommandContext], Awaitable[None]]
 @dataclass
 class Command:
     name: str
-    summary: str
     run: CommandFn
     aliases: tuple[str, ...] = ()
     usage: str = ""
@@ -54,6 +53,11 @@ class Command:
     @property
     def all_names(self) -> tuple[str, ...]:
         return (self.name, *self.aliases)
+
+    @property
+    def summary(self) -> str:
+        """One-line description, looked up on every read so it follows `lang`."""
+        return _("cli", "commands", "help", self.name)
 
 
 class CommandRegistry:
@@ -104,92 +108,71 @@ class CommandRegistry:
     def _register_builtins(self) -> None:
         # Register from a list to keep the file readable
         defs: list[Command] = [
-            Command("help", "List commands or show help for one", _cmd_help, ("?",), "help [cmd]"),
-            Command("exit", "Quit the application", _cmd_exit, ("quit", "q")),
-            Command("status", "Show current state, watch target, websockets", _cmd_status),
-            Command("log", "Print the last N output lines (default 20)", _cmd_log, usage="log [N]"),
-            Command("clear", "Clear the screen", _cmd_clear),
-            Command("version", "Show the running version", _cmd_version),
-            Command("about", "Show project information and links", _cmd_about),
+            Command("help", _cmd_help, ("?",), "help [cmd]"),
+            Command("exit", _cmd_exit, ("quit", "q")),
+            Command("status", _cmd_status),
+            Command("log", _cmd_log, usage="log [N]"),
+            Command("clear", _cmd_clear),
+            Command("version", _cmd_version),
+            Command("about", _cmd_about),
 
-            Command("login", "Force a fresh OAuth device-code login", _cmd_login),
-            Command("whoami", "Show the logged-in Twitch user id", _cmd_whoami),
-            Command(
-                "helper",
-                "Show or change the browser login helper endpoint",
-                _cmd_helper,
-                usage="helper [on|off|renew]",
-            ),
+            Command("login", _cmd_login),
+            Command("whoami", _cmd_whoami),
+            Command("helper", _cmd_helper, usage="helper [on|off|renew]"),
 
-            Command("pause", "Pause mining (drop into IDLE)", _cmd_pause),
-            Command("resume", "Resume mining (re-fetch inventory)", _cmd_resume),
-            Command("reload", "Reload the entire client", _cmd_reload),
+            Command("pause", _cmd_pause),
+            Command("resume", _cmd_resume),
+            Command("reload", _cmd_reload),
 
-            Command(
-                "watch",
-                "Watch the given channel by login",
-                _cmd_watch,
-                usage="watch <channel-login>",
-            ),
-            Command("unwatch", "Stop watching the current channel", _cmd_unwatch),
+            Command("watch", _cmd_watch, usage="watch <channel-login>"),
+            Command("unwatch", _cmd_unwatch),
 
-            Command("inventory", "List campaigns and drop progress", _cmd_inventory, ("inv",)),
-            Command("campaigns", "List campaigns only", _cmd_campaigns),
-            Command("drops", "Show progress on the active drop", _cmd_drops),
-            Command("claim", "Force-claim any pending drops", _cmd_claim),
+            Command("inventory", _cmd_inventory, ("inv",)),
+            Command("campaigns", _cmd_campaigns),
+            Command("drops", _cmd_drops),
+            Command("claim", _cmd_claim),
 
-            Command(
-                "channels",
-                "List known channels (online first)",
-                _cmd_channels,
-                usage="channels [--all]",
-            ),
-            Command("online", "List only online channels", _cmd_online),
+            Command("channels", _cmd_channels, usage="channels [--all]"),
+            Command("online", _cmd_online),
 
             Command(
                 "priority",
-                "Manage priority list",
                 _cmd_priority,
                 usage="priority list|add <game>|remove <game>|move <game> <delta>|clear",
             ),
             Command(
                 "exclude",
-                "Manage excluded games",
                 _cmd_exclude,
                 usage="exclude list|add <game>|remove <game>|clear",
             ),
             Command(
                 "mode",
-                "Get/set priority mode",
                 _cmd_mode,
                 usage="mode [priority_only|ending_soonest|low_avbl_first]",
             ),
-            Command("proxy", "Show or set the HTTP proxy", _cmd_proxy, usage="proxy [<url>|clear]"),
+            Command("proxy", _cmd_proxy, usage="proxy [<url>|clear]"),
             Command(
                 "lang",
-                "Show or list languages, or set the current language",
                 _cmd_lang,
                 usage="lang [-ls | --list] | lang <code>",
             ),
             Command(
                 "quality",
-                "Show or set the connection quality (0=lowest..2=highest)",
                 _cmd_quality,
                 usage="quality [0|1|2]",
             ),
             Command(
                 "reload-interval",
-                "Show or set inventory reload interval in minutes",
                 _cmd_reload_interval,
                 ("interval",),
                 usage="reload-interval [<minutes>]",
             ),
-            Command("get", "Print a setting value", _cmd_get, usage="get <key>"),
-            Command("set", "Update a setting value", _cmd_set, usage="set <key> <value>"),
-            Command("save", "Persist settings to disk now", _cmd_save),
+            Command("get", _cmd_get, usage="get <key>"),
+            Command("set", _cmd_set, usage="set <key> <value>"),
+            Command("save", _cmd_save),
 
-            Command("level", "Set log level (DEBUG/INFO/WARNING/ERROR/CRITICAL)", _cmd_level),
-            Command("dump", "Toggle GQL response dump", _cmd_dump),
+            Command("level", _cmd_level),
+            Command("dump", _cmd_dump),
         ]
         for d in defs:
             self.add(d)
@@ -214,8 +197,10 @@ async def _cmd_help(ctx: CommandContext) -> None:
         aliases = ", ".join(cmd.aliases) or _("cli", "commands", "aliases_none")
         ctx.cli.print_raw(f"{cmd.name}  —  {cmd.summary}")
         if cmd.usage:
-            ctx.cli.print_raw(f"  usage:   {cmd.usage}")
-        ctx.cli.print_raw(f"  aliases: {aliases}")
+            ctx.cli.print_raw(
+                f"  {_('cli', 'commands', 'help_usage_label')} {cmd.usage}"
+            )
+        ctx.cli.print_raw(f"  {_('cli', 'commands', 'help_aliases_label')} {aliases}")
         return
     ctx.cli.print_raw(_("cli", "commands", "help_header"))
     for cmd in registry.all():
