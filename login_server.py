@@ -115,9 +115,11 @@ def _page(strings: dict[str, str]) -> str:
   #screen {{ position:relative; background:#000; outline:none; min-height:420px }}
   canvas {{ display:block; width:100%; height:auto; cursor:default }}
   /* Until the first frame arrives there is nothing to look at, so the area
-     says what is happening instead of sitting there black. */
+     says what is happening instead of sitting there black. It is decoration
+     and must not take clicks: a click that lands on it instead of the canvas
+     is one the browser on the miner never hears about. */
   #waiting {{ position:absolute; inset:0; display:flex; align-items:center;
-              justify-content:center; color:#adadb8 }}
+              justify-content:center; color:#adadb8; pointer-events:none }}
   #screen.started #waiting {{ display:none }}
   p {{ margin:10px 14px; color:#adadb8 }}
 </style></head>

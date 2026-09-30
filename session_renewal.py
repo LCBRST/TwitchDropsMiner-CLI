@@ -427,6 +427,28 @@ class SessionRenewal:
             return "no-browser"
         return None
 
+    def can_revive(self) -> bool:
+        """
+        Whether an expired stored proof could be replaced by a renewal.
+
+        What a short outage leaves behind: the proof itself lives an hour or so,
+        while the SDK cookie it was minted with lives a day, so "expired but
+        renewable" is an ordinary state rather than a dead end. Narrower than
+        `can_renew`, which also says yes to a session that is perfectly fresh.
+        """
+        if self.can_renew() is not None:
+            return False
+        seed = self._read_seed()
+        if seed is None or seed.cookie is None:
+            return False
+        # Both halves matter: a proof past its date is the thing being replaced,
+        # and a cookie past its date is what there is nothing left to mint from.
+        # `can_renew` only asks whether a cookie is there at all.
+        return (
+            not seed.bundle.is_fresh(self.clock())
+            and seed.cookie.is_fresh(self.clock())
+        )
+
     async def _run(self) -> None:
         retry = 5.0
         while not self._stopping:

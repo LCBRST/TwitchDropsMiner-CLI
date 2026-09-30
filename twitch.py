@@ -125,6 +125,12 @@ class _AuthState:
         # can give way instead of making the user wait for the code to expire.
         self._import_pending = asyncio.Event()
 
+    # How long to wait for a renewal that is already under way to replace an
+    # expired proof. Minting one starts a browser and waits for Kasada's script,
+    # which takes tens of seconds; this is only the point at which waiting stops
+    # being worth it and a sign-in is asked for instead.
+    REVIVE_WAIT = 180.0
+
     def _hasattrs(self, *attrs: str) -> bool:
         return all(hasattr(self, attr) for attr in attrs)
 
@@ -161,10 +167,10 @@ class _AuthState:
             bundle.require_fresh()
         except SessionImportError as error:
             if error.code != "MISSING":
-                logger.warning(
-                    f"Ignoring the imported session ({error.code}) - falling back to"
-                    f" the saved login"
-                )
+                # What happens next depends on whether a renewal can replace it,
+                # so this says only what it knows: the file as it stands is no
+                # good, and the caller says what is being done about that.
+                logger.warning(f"The stored session is unusable ({error.code})")
             self._imported_refused = key
             return None
         self._imported, self._imported_key = bundle, key
@@ -188,6 +194,20 @@ class _AuthState:
         up once here rather than assumed; nothing about it may be re-derived.
         """
         bundle = self._load_imported()
+        if bundle is None and self._twitch.renewal_can_revive:
+            # An expired proof is not a dead end while the SDK cookie it was
+            # minted with is still good - and that cookie outlives the proof by
+            # hours, so this is what an overnight outage leaves behind. Renewal
+            # has already started on it: it does not wait when the proof is past
+            # its date. Waiting here is the difference between that costing
+            # nothing and it costing a sign-in.
+            logger.info("The stored session has expired; waiting for renewal to replace it")
+            deadline = time() + self.REVIVE_WAIT
+            while bundle is None and time() < deadline:
+                # Raises _ImportReady the moment a renewal lands, which restarts
+                # this whole check against the rewritten file.
+                await self._sleep_or_import(self.SIGN_IN_POLL)
+                bundle = self._load_imported()
         if bundle is None:
             # No usable file: make sure a wake-up for one that never worked does
             # not keep interrupting the device code login.
@@ -948,6 +968,11 @@ class Twitch:
             on_renewed=self._on_session_renewed,
         )
         self._renewal.start()
+
+    @property
+    def renewal_can_revive(self) -> bool:
+        """Whether a renewal already under way could produce a usable session."""
+        return self._renewal is not None and self._renewal.can_revive()
 
     def _expected_login_user_id(self) -> int | None:
         """The account an incoming session must belong to, if one is in use."""
