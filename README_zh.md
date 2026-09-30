@@ -45,6 +45,17 @@ chmod +x ./TwitchDropsMiner-CLI_Linux && ./TwitchDropsMiner-CLI_Linux   # Linux
 
 ```bash
 git clone https://github.com/LCBRST/TwitchDropsMiner-CLI.git
+**Linux 一条命令** —— 装好浏览器和 `Xvfb`、从源码构建，然后把构建环境清理干净：
+
+```bash
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+chmod +x install_linux.sh && ./install_linux.sh
+```
+
+**从源码安装** —— Python 3.10 以上，Linux / macOS / Windows 都行：
+
+```bash
+git clone https://github.com/LCBRST/TwitchDropsMiner-CLI.git
 cd TwitchDropsMiner-CLI
 python3 -m venv venv
 venv/bin/pip install -U pip wheel          # Windows 上是 venv\Scripts\pip

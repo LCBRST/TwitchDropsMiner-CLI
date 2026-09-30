@@ -15,6 +15,17 @@
 | 📦 [Releases](https://github.com/LCBRST/TwitchDropsMiner-CLI/releases) | 现成的构建 |
 | 📖 [README](https://github.com/LCBRST/TwitchDropsMiner-CLI#readme) | 简短版说明 |
 
+## Linux 安装
+
+一条命令 —— 装好浏览器和 `Xvfb`、从源码构建，然后把构建环境清理干净：
+
+```
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+chmod +x install_linux.sh && ./install_linux.sh
+```
+
+预构建二进制和源码安装见[入门指南](Getting-started.zh-CN#安装)。
+
 ## 唯一容易踩的坑
 
 Twitch 只让部分登录类型看到活动列表，而程序自己能签发的那些已经不在其中了。这种会话

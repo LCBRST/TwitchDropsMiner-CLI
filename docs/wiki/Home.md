@@ -17,6 +17,19 @@ a container, over SSH, or on a Raspberry Pi.
 | 📦 [Releases](https://github.com/LCBRST/TwitchDropsMiner-CLI/releases) | prebuilt binaries |
 | 📖 [README](https://github.com/LCBRST/TwitchDropsMiner-CLI#readme) | the short version |
 
+## Installing on Linux
+
+One command — it installs the browser and `Xvfb`, builds from source, and cleans
+the build environment up afterwards:
+
+```
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+chmod +x install_linux.sh && ./install_linux.sh
+```
+
+See [Getting started](Getting-started#install) for the prebuilt binary and the
+source install.
+
 ## The one thing that trips people up
 
 Twitch only lets some login types read the campaign catalogue, and the ones this
