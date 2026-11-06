@@ -9,17 +9,17 @@ from typing import TYPE_CHECKING
 from functools import cached_property
 from datetime import datetime, timedelta, timezone
 
-from translate import _
-from channel import Channel
-from utils import timestamp, Game
-from exceptions import GQLException
-from constants import GQL_QUERIES, MAX_EXTRA_MINUTES, URLType, State
+from twitchdropsminer.common.translate import _
+from twitchdropsminer.core.channel import Channel
+from twitchdropsminer.common.utils import timestamp, Game
+from twitchdropsminer.common.exceptions import GQLException
+from twitchdropsminer.common.constants import GQL_QUERIES, MAX_EXTRA_MINUTES, URLType, State
 
 if TYPE_CHECKING:
     from collections import abc
 
-    from twitch import Twitch
-    from constants import JsonType
+    from twitchdropsminer.core.twitch import Twitch
+    from twitchdropsminer.common.constants import JsonType
 
 
 logger = logging.getLogger("TwitchDrops")

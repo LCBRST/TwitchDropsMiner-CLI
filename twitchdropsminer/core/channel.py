@@ -12,14 +12,14 @@ from typing import Any, SupportsInt, cast, TYPE_CHECKING
 import aiohttp
 from yarl import URL
 
-from utils import Game, json_minify, isonow
-from exceptions import MinerException, RequestException
-from constants import CALL, GQL_QUERIES, ONLINE_DELAY, URLType, GQLQuery
+from twitchdropsminer.common.utils import Game, json_minify, isonow
+from twitchdropsminer.common.exceptions import MinerException, RequestException
+from twitchdropsminer.common.constants import CALL, GQL_QUERIES, ONLINE_DELAY, URLType, GQLQuery
 
 if TYPE_CHECKING:
-    from twitch import Twitch
+    from twitchdropsminer.core.twitch import Twitch
     from gui import ChannelList
-    from constants import JsonType, GQLPersistedQuery
+    from twitchdropsminer.common.constants import JsonType, GQLPersistedQuery
 
 
 logger = logging.getLogger("TwitchDrops")

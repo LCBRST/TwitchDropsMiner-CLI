@@ -35,9 +35,9 @@ from typing import Any, NoReturn, TypeVar, TYPE_CHECKING
 
 from yarl import URL
 
-from exceptions import ExitRequest
-from translate import _
-from constants import OUTPUT_FORMATTER, LOG_DIR, HISTORY_PATH
+from twitchdropsminer.common.exceptions import ExitRequest
+from twitchdropsminer.common.translate import _
+from twitchdropsminer.common.constants import OUTPUT_FORMATTER, LOG_DIR, HISTORY_PATH
 
 # Use prompt_toolkit for a fullscreen TUI shell: scrollable log area,
 # command history, line-editing, tab completion, and mouse-wheel support.
@@ -75,10 +75,10 @@ _HISTORY_PATH = HISTORY_PATH
 _HISTORY_LENGTH = 1000
 
 if TYPE_CHECKING:
-    from twitch import Twitch
-    from inventory import DropsCampaign, TimedDrop
-    from channel import Channel
-    from utils import Game
+    from twitchdropsminer.core.twitch import Twitch
+    from twitchdropsminer.core.inventory import DropsCampaign, TimedDrop
+    from twitchdropsminer.core.channel import Channel
+    from twitchdropsminer.common.utils import Game
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -447,8 +447,8 @@ if _HAS_PROMPT_TOOLKIT:
         }
         _SETTING_KEYS: list[str] = [
             "proxy", "language", "exclude", "priority", "priority_mode",
-            "connection_quality", "reload_interval", "tray_notifications",
-            "dark_mode", "autostart_tray",
+            "connection_quality", "reload_interval",
+            "api_enabled", "api_host", "api_port", "api_token", "api_auth_enabled",
         ]
 
         def __init__(self, cli: "CLIManager") -> None:
@@ -520,7 +520,7 @@ if _HAS_PROMPT_TOOLKIT:
 
             # Lang completion
             if cmd == "lang":
-                from constants import LANG_PATH
+                from twitchdropsminer.common.constants import LANG_PATH
                 for f in sorted(LANG_PATH.glob("*.json")):
                     code = f.stem
                     if code.lower().startswith(word_lower):
@@ -591,7 +591,7 @@ class CLIManager:
         logging.getLogger("TwitchDrops").addHandler(self._handler)
 
         # Banner
-        from version import __version__
+        from twitchdropsminer.common.version import __version__
         self.print(_("cli", "separator"))
         self.print(_("cli", "banner").format(version=__version__))
         self.print(_("cli", "separator"))
@@ -675,6 +675,38 @@ class CLIManager:
                 sys.stdout.flush()
             except Exception:
                 pass
+
+    def set_clipboard(self, text: str) -> bool:
+        """
+        Best-effort OSC 52 clipboard write, which also works over SSH.
+
+        The sequence is interpreted by the terminal at the other end of the
+        connection, so no X/Wayland clipboard tool is needed on this machine.
+        Some terminals refuse it; the caller offers a file fallback.
+        """
+        import base64
+
+        sequence = (
+            "\x1b]52;c;"
+            + base64.b64encode(text.encode("utf8")).decode("ascii")
+            + "\x07"
+        )
+        app = getattr(self, "_app", None)
+        if app is not None and app.is_running:
+            try:
+                app.output.write_raw(sequence)
+                app.output.flush()
+                return True
+            except Exception:
+                pass
+        if not self._is_tty:
+            return False
+        try:
+            sys.stdout.write(sequence)
+            sys.stdout.flush()
+            return True
+        except Exception:
+            return False
 
     def clear_screen(self) -> None:
         """Clear the log display area.
@@ -812,7 +844,7 @@ class CLIManager:
 
     def _top_bar_text(self) -> str:
         """Persistent top status bar: engine state, login, watching, counts, progress."""
-        from version import __version__
+        from twitchdropsminer.common.version import __version__
         twitch = self._twitch
         raw_state = twitch._state.name if hasattr(twitch, "_state") else "?"
         watching = self.channels._watching
@@ -872,7 +904,7 @@ class CLIManager:
     if _HAS_PROMPT_TOOLKIT:
 
         async def _shell_loop(self) -> None:
-            from commands import CommandRegistry
+            from twitchdropsminer.cli.commands import CommandRegistry
             self._registry = CommandRegistry(self._twitch, self)
 
             # ---- buffers ---------------------------------------------------
@@ -1067,7 +1099,7 @@ class CLIManager:
     else:
 
         async def _shell_loop(self) -> None:  # type: ignore[no-redef]
-            from commands import CommandRegistry
+            from twitchdropsminer.cli.commands import CommandRegistry
             self._registry = CommandRegistry(self._twitch, self)
 
             if _HAS_READLINE:

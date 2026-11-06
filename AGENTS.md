@@ -26,11 +26,17 @@ They are not stylistic preferences.
    this file is an illustration (`192.0.2.0/24` is reserved for documentation),
    so none of them can be used as-is. `0.0.0.0` is a bind address and nothing can
    connect to it; see [step 5](#step-5-signing-in).
-6. **Ask before enabling `login_server_enabled` on a machine reachable from an
-   untrusted network.** While it is on, anyone who can reach the port and has the
-   token can drive a browser that is signed in.
-7. Do not modify `gui.py`, the engine in `twitch.py`, or `cookies.jar` handling to
-   "make something work". Report the blocker instead.
+6. **Ask before enabling `login_server_enabled` or `api_enabled` on a machine
+   reachable from an untrusted network.** While the sign-in endpoint is on,
+   anyone who can reach the port and has the token can drive a browser that is
+   signed in; while the management API is on, anyone with its token can pause
+   mining, pick channels, claim drops, change settings and exit the miner. The
+   API binds `0.0.0.0` by default so the dashboard works from a phone or another
+   computer on the LAN; it is token-protected, but ask before exposing it on an
+   untrusted network, and set `api_host` to `127.0.0.1` to restrict it.
+7. Do not modify `gui.py`, the engine in
+   `twitchdropsminer/core/twitch.py`, or `cookies.jar` handling to "make
+   something work". Report the blocker instead.
 
 ## Facts
 
@@ -40,8 +46,8 @@ They are not stylistic preferences.
 | Runtime deps | `aiohttp`, `yarl`, `prompt_toolkit`, `truststore` |
 | No display needed | no - signing in opens a browser window, and where there is no screen the miner starts `Xvfb` to be one |
 | **Data directory** | **the folder containing `main.py` (source) or the executable (build)** — not the current working directory |
-| Files it creates there | `settings.json`, `cookies.jar`, `imported-session.json`, `lock.file`, `log/` |
-| Listeners it opens | none by default; one TCP port while a sign-in is open, and only where nobody can see the miner's screen |
+| Files it creates there | `settings.json`, `cookies.jar`, `imported-session.json`, `lock.file`, `log/`, and `cache/images/` for dashboard artwork |
+| Listeners it opens | none by default; one TCP port while a sign-in is open (and only where nobody can see the miner's screen), plus the optional management API on `0.0.0.0:8091` when `api_enabled` is set |
 | Release builds | Linux and Windows; **no macOS binary** |
 | Upstream | DevilXD/TwitchDropsMiner (the mining engine) |
 | Sign-in | a headful Chromium the miner starts itself; the user drives it directly, or through a page it serves |
@@ -338,15 +344,17 @@ context (<code>)`.
 | `Unable to obtain a device code` | that client's device flow is closed — only reachable through `login device` | sign in with a browser instead, via [step 5](#step-5-signing-in) |
 | `BROWSER_MISSING` | no Chromium-based browser on the miner | install one — see [step 6](#step-6-keep-the-login-alive) |
 | `BROWSER_DISPLAY` | no display, and no `Xvfb` to stand in for one | `sudo apt install xvfb`, or the distribution's equivalent |
-| `BROWSER_START` | the browser was found but would not start | on a minimal server, usually missing shared libraries; a snap or flatpak wrapper does this too |
+| `BROWSER_START` | the browser was found but would not start | run `login doctor`; it prints the path and the browser's own stderr tail. On a minimal server this is usually missing shared libraries; a snap or flatpak wrapper does this too |
 | `BROWSER_PROTOCOL` | the browser stopped answering | retry `login browser`; if it repeats, report it |
+| Windows: both `login browser` and renewal fail, and `login doctor` also fails | the browser cannot launch at all (policy, wrapper, session 0, missing files) | read the `Browser start failed` line: it now carries the executable and Chrome/Edge's stderr tail. Run the first sign-in from an interactive desktop session, not a Windows service or session-0 scheduled task |
 | `bind_failed` | the port is already taken | another instance is probably running, or `login_server_port` collides — `netstat -ano \| findstr 8090` on Windows, `ss -ltnp \| grep 8090` on Linux |
 | `LOGIN_TIMEOUT` | nobody finished signing in in time | retry when the user is ready |
 | `LOGIN_CANCELLED` | cancelled from the page, or by `login cancel` | retry if that was not intended |
 | `LOGIN_CLOSED` | the browser closed before the sign-in finished | retry |
 | `ACCOUNT_MISMATCH` | that sign-in was for a different account than the miner is using | sign in as the account the miner already uses, or start from a clean `imported-session.json` to switch |
 | log: `Twitch did not accept a captured login context: AUTH` / `IDENTITY` | the captured token did not validate | retry; if it repeats, report it |
-| log: `Twitch did not accept a captured login context: CATALOG` | that context cannot read the catalogue | retry the sign-in |
+| log: `Twitch did not accept a captured login context: CATALOG` | that candidate cannot read the catalogue | retry the sign-in; the page keeps looking for a fresh candidate, and a later one can pass |
+| log: `This session cannot read the campaign catalog (failed integrity check); keeping it for in-progress campaigns` | Twitch gates the catalogue harder than the inventory; this session can still mine | expected after a renewal in a flagged context. In-progress mining continues; run `login browser` to restore campaign discovery |
 | log: `Could not reach Twitch to check a captured login context` | the probe timed out | **not** a rejection — the sign-in keeps waiting and retries by itself |
 | `The browser sign-in failed` with a traceback | an unexpected error | report the traceback |
 | `renewal: unavailable - no session has been imported yet` | nothing has been captured | expected before step 5 |
@@ -359,6 +367,12 @@ context (<code>)`.
 
 These are the log strings, which is what `log/` contains. `login status` shows the
 same reasons translated into the user's language.
+
+`login doctor` launches a throwaway headless browser and reports whether the
+shared launch path (used by both the sign-in and renewal) works. It prints the
+browser path and, on failure, the browser's own stderr tail. Every
+`BROWSER_START` failure now logs the same tail, so a Windows report should
+include the `Browser start failed` line rather than only the code.
 
 ## Things that are easy to get wrong
 
@@ -376,6 +390,23 @@ same reasons translated into the user's language.
   session is in. A later sign-in reopens it by itself - there is no command to
   turn it on, and none is needed.
 
+## Source layout
+
+```
+main.py                    entry point, arguments, watchdog
+twitchdropsminer/
+  common/                  constants, settings, translations, utils, exceptions
+  core/                    twitch engine, channel, inventory, websocket
+  auth/                    browser login, session import/renewal, sign-in server
+  web/                     management API and image cache
+  cli/                     CLIManager and command registry
+tools/                     build, install, cleanup and web-ui sync scripts
+lang/ webui/ docs/         translations, dashboard assets, documentation
+```
+
+Build with `./tools/build_cli.sh` (Linux) or `tools\build.bat` (Windows); both
+write `dist/`.
+
 ## Reference
 
 Full user-facing documentation:
@@ -389,6 +420,11 @@ persisted to `settings.json`:
 | `login_server_enabled` | `false` | serves the sign-in page; turned on by itself when a sign-in is asked for |
 | `login_server_host` | `0.0.0.0` | bind address |
 | `login_server_port` | `8090` | |
+| `api_enabled` | `false` | serves the management API and web dashboard; enable with `api on` |
+| `api_host` | `0.0.0.0` | all interfaces, so LAN devices can reach the dashboard; set `127.0.0.1` to restrict |
+| `api_port` | `8091` | |
+| `api_token` | generated | required by every `/api/*` request while authentication is on; `api token` shows it, `api token <new>` sets one, `api rotate` generates one |
+| `api_auth_enabled` | `true` | `api auth off` makes the dashboard and `/api/*` public; only on a trusted network |
 | `renewal_browser_path` | `""` | empty means auto-detect |
 | `quality` | `1` | connection timeout multiplier; the `quality` command accepts `0..2` |
 | `proxy` | empty | or set `https_proxy` in the environment |
@@ -397,5 +433,5 @@ persisted to `settings.json`:
 
 If you are changing the code rather than deploying it: the engine never imports
 `cli` or `commands`, it only calls `self.gui.*`; register new commands in
-`commands.py`'s `_register_builtins()`; run the test suites described in
+`twitchdropsminer/cli/commands.py`'s `_register_builtins()`; run the test suites described in
 `docs/getting-started.md`.

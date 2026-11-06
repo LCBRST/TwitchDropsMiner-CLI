@@ -31,14 +31,14 @@ from typing import Any
 import aiohttp
 from yarl import URL
 
-from browser_cdp import (
+from twitchdropsminer.auth.browser_cdp import (
     GQL_URL,
     INTEGRITY_URL,
     OwnedChromium,
     browser_target,
 )
-from constants import IMPORTED_SESSION_PATH
-from session_import import (
+from twitchdropsminer.common.constants import IMPORTED_SESSION_PATH
+from twitchdropsminer.auth.session_import import (
     SDKCookie,
     ServerSeed,
     SessionBundle,
@@ -372,9 +372,10 @@ class BrowserLogin:
         self, *, executable: str, on_accepted: Callable[[int], None],
         expected_user_id: Callable[[], int | None] = lambda: None,
         timeout: float = TOTAL_TIMEOUT, clock: Callable[[], float] = time,
-        session_file: Path = IMPORTED_SESSION_PATH,
+        session_file: Path = IMPORTED_SESSION_PATH, proxy: str = "",
     ):
         self.executable: str = executable
+        self.proxy: str = proxy
         self.on_accepted = on_accepted
         self.expected_user_id = expected_user_id
         self.timeout: float = timeout
@@ -511,7 +512,7 @@ class BrowserLogin:
                 browser = OwnedChromium(
                     self.executable, no_sandbox=no_sandbox, headless=False,
                     env={} if display is None else {"DISPLAY": display},
-                    profile_prefix="tdm-login-",
+                    profile_prefix="tdm-login-", proxy=self.proxy,
                 )
                 async with browser.start() as address:
                     async with browser_target(

@@ -61,7 +61,7 @@ chmod +x ./TwitchDropsMiner-CLI_Linux && ./TwitchDropsMiner-CLI_Linux    # Linux
 Fetches this script, runs it, done:
 
 ```bash
-wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/tools/install_linux.sh
 chmod +x install_linux.sh
 ./install_linux.sh
 ```
@@ -270,20 +270,60 @@ browser is started with `--no-sandbox`, which Chromium requires in that case.
 | Force a refresh | `reload` |
 | Check the login | `whoami`, `login status` |
 
+## Web dashboard
+
+The miner can serve a management page alongside mining. It is off by default;
+once enabled it listens on all interfaces so a phone or another computer on the
+same network can open it:
+
+```
+api on        # :8091, prints the LAN address, generates a token
+api open      # open the dashboard already signed in on this machine
+api status    # show the LAN address to use from another device
+```
+
+`api copy` copies the token to the clipboard if you would rather paste it
+yourself; `api token` prints it, and `api token <your-token>` sets a custom one.
+While authentication is on (the default), every `/api` request needs that
+token. `api auth off` (or `set api_auth_enabled false`) makes the dashboard
+connect without asking; that leaves the miner controllable by anything that can
+reach the port, so only do it on a trusted network.
+
+Over SSH, `api copy` and `copy [N]` use OSC 52, so the terminal handles the
+clipboard. If yours blocks it, `copy [N]` writes `copy.txt` and `api file`
+writes `api-token.txt` (mode 600) in the data directory; fetch it with scp.
+
+It shows live progress, channels, campaigns, settings and logs, and can
+pause/resume mining, pick a channel, claim drops and change settings. The
+Twitch sign-in panel lives on its Settings page: start a browser sign-in there
+and drive it in the embedded viewer (the page is proxied through the dashboard's
+own port, so only that port needs forwarding), or renew the imported session
+without the CLI.
+
+Reward and campaign artwork is cached under `cache/images/` and served by the
+miner, so the page does not need the Twitch CDN. Images for campaigns that have
+left the inventory are removed automatically.
+
+The page is the [TwitchDropMiner_WebAddon](https://github.com/LCBRST/TwitchDropMiner_WebAddon)
+project; its `API.md` documents the HTTP endpoints. The API can control the
+miner; on a network you do not trust, set `api_host` back to `127.0.0.1`.
+
 ## Commands
 
 `help` lists everything; this is the full set.
 
-**General** — `help [cmd]`, `status`, `version`, `log [N]`, `clear`,
+**General** — `help [cmd]`, `status`, `version`, `log [N]`, `copy [N]`, `clear`,
 `exit` / `quit` / `q`
 
-**Login** — `whoami`, `login [browser|status|cancel|renew|device]`
+**Login** — `whoami`, `login [browser|status|cancel|renew|device|doctor]`
 
 **Mining** — `pause`, `resume`, `reload`, `watch <login>`, `unwatch`, `claim`
 
 **Inventory** — `inventory` (`inv`), `campaigns`, `drops`
 
 **Channels** — `channels [--all]`, `online`
+
+**API** — `api [status|on|off|auth|open|copy|file|token|rotate]`
 
 **Settings** — everything below persists to `settings.json`:
 
@@ -311,6 +351,7 @@ Everything lives next to the executable (or the repository root).
 | `imported-session.json` | the session captured from the sign-in browser — **also a credential** |
 | `lock.file` | single-instance lock; safe to delete after a crash |
 | `log/` | timestamped logs plus command history |
+| `cache/images/` | dashboard artwork; safe to delete, refetched on demand |
 
 Back up `cookies.jar` and `imported-session.json` if you want to move the
 installation; both are credentials, so keep them private and never commit them.
@@ -406,28 +447,20 @@ progress per account, and watching at the same time confuses the reporting.
 Only useful if you intend to change something.
 
 ```
-              +---------------------+        +-----------------------+
-              |  twitch.py engine   |  uses  |   gui interface       |
-              | (state machine,     +------->|   (tray, status,      |
-              |  GQL, websockets)   |        |    channels, inv,     |
-              +----------+----------+        |    progress, login)   |
-                         |                   +----------+------------+
-                         | self.gui = ...               |
-                         |                              |
-              +----------v----------+        +----------v-----------+
-              |  cli.CLIManager     |        |  gui.GUIManager      |
-              |  (default)          |  XOR   |  (TDM_GUI=1)         |
-              |                     |        |                      |
-              | + interactive shell |        |  + tk/pystray UI     |
-              +----------+----------+        +----------------------+
-                         |
-              +----------v----------+
-              |  commands.py        |
-              |  CommandRegistry    |
-              +---------------------+
+main.py                    entry point, arguments, watchdog
+twitchdropsminer/
+  common/                  constants, settings, translations, utils, exceptions
+  core/                    twitch.py engine (state machine, GQL, websockets),
+                           channel.py, inventory.py, websocket.py
+  auth/                    browser login, session import/renewal, sign-in server
+  web/                     management API, image cache
+  cli/                     cli.py CLIManager, commands.py CommandRegistry
+tools/                     build, install, cleanup and web-ui sync scripts
+lang/ webui/ docs/         data and documentation
 ```
 
-The engine never imports `cli` or `commands`; it only ever calls `self.gui.*`.
+The engine never imports the CLI or command modules; it only ever calls
+`self.gui.*`.
 `CLIManager` implements every method the engine uses — `tray.change_icon`,
 `status.update`, `channels.set_watching/clear/display`, `progress.display`,
 `inv.add_campaign`, `websockets.update`, `login.ask_login`,
@@ -436,7 +469,8 @@ The engine never imports `cli` or `commands`; it only ever calls `self.gui.*`.
 `grab_attention`, `coro_unless_closed`, `wait_until_closed`, `running`,
 `close_requested`.
 
-New commands are registered in `commands.py`'s `_register_builtins()`.
+New commands are registered in `twitchdropsminer/cli/commands.py`'s
+`_register_builtins()`.
 
 ## Credits
 

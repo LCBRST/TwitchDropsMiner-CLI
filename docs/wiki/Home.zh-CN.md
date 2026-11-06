@@ -20,11 +20,30 @@
 一条命令 —— 装好浏览器和 `Xvfb`、从源码构建，然后把构建环境清理干净：
 
 ```
-wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/tools/install_linux.sh
 chmod +x install_linux.sh && ./install_linux.sh
 ```
 
-预构建二进制和源码安装见[入门指南](Getting-started.zh-CN#安装)。
+预构建二进制和源码安装见[入门指南](Getting-started.zh-CN#安装)。从源码构建时，
+构建和安装脚本都在 `tools/`（`tools/build_cli.sh`、`tools\build.bat`）。
+
+## 网页控制台
+
+矿工可以在挖宝的同时提供一个管理页面，监听所有网卡，同一局域网里的手机或电脑也能打开：
+
+```
+api on        # :8091，打印局域网地址并生成口令
+api open      # 在本机直接打开已登录的控制台
+api status    # 查看从其他设备访问要用的局域网地址
+```
+
+页面里能看实时掉宝/活动进度、掉宝仓库、频道、设置和日志，也可以暂停/继续、
+手动选频道、领取掉宝、修改设置。Twitch 登录面板在设置页：可以在网页里发起
+浏览器登录，并通过内嵌画面直接操作登录浏览器（通过控制台自己的端口代理），
+也可以在网页里续签会话。奖励图和封面会本地缓存，并在活动结束后自动清理。
+
+默认需要口令；`api token <新口令>` 可以自定义，`api auth off` 可以关闭认证
+（只在可信网络里这样做 —— 接口能控制矿工）。详见[入门指南](Getting-started.zh-CN#网页控制台)。
 
 ## 唯一容易踩的坑
 

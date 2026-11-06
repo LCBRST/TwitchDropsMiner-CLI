@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import secrets
 import asyncio
 import logging
 from time import time
@@ -16,11 +17,11 @@ from typing import Any, Literal, Final, NoReturn, overload, cast, TYPE_CHECKING
 import aiohttp
 from yarl import URL
 
-from translate import _
-from channel import Channel
-from websocket import WebsocketPool
-from inventory import DropsCampaign
-from exceptions import (
+from twitchdropsminer.common.translate import _
+from twitchdropsminer.core.channel import Channel
+from twitchdropsminer.core.websocket import WebsocketPool
+from twitchdropsminer.core.inventory import DropsCampaign
+from twitchdropsminer.common.exceptions import (
     ExitRequest,
     GQLException,
     ReloadRequest,
@@ -31,7 +32,7 @@ from exceptions import (
     RequestException,
     SignInRequired,
 )
-from utils import (
+from twitchdropsminer.common.utils import (
     CHARS_HEX_LOWER,
     chunk,
     timestamp,
@@ -41,7 +42,7 @@ from utils import (
     AwaitableValue,
     ExponentialBackoff,
 )
-from constants import (
+from twitchdropsminer.common.constants import (
     CALL,
     MAX_INT,
     DUMP_PATH,
@@ -58,22 +59,23 @@ from constants import (
     CLIENT_TYPE_PREFERENCE,
     IMPORTED_SESSION_PATH,
 )
-from login_server import LoginEndpoint, start_reason
-from browser_cdp import find_browser
-from browser_login import has_display, has_visible_display
-from session_renewal import SessionRenewal
-from session_import import (
+from twitchdropsminer.auth.login_server import LoginEndpoint, start_reason
+from twitchdropsminer.web.api_server import APIEndpoint
+from twitchdropsminer.auth.browser_cdp import OwnedChromium, find_browser
+from twitchdropsminer.auth.browser_login import has_display, has_visible_display
+from twitchdropsminer.auth.session_renewal import SessionRenewal
+from twitchdropsminer.auth.session_import import (
     PrivateSessionFile,
     SessionBundle,
     SessionImportError,
 )
 
 if TYPE_CHECKING:
-    from utils import Game
-    from channel import Stream
-    from settings import Settings
-    from inventory import TimedDrop
-    from constants import JsonType, GQLOperation
+    from twitchdropsminer.common.utils import Game
+    from twitchdropsminer.core.channel import Stream
+    from twitchdropsminer.common.settings import Settings
+    from twitchdropsminer.core.inventory import TimedDrop
+    from twitchdropsminer.common.constants import JsonType, GQLOperation
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -130,6 +132,12 @@ class _AuthState:
     # which takes tens of seconds; this is only the point at which waiting stops
     # being worth it and a sign-in is asked for instead.
     REVIVE_WAIT = 180.0
+    # Renewal failures that retrying will not fix. Waiting out REVIVE_WAIT for
+    # one of these is what makes startup look hung: fall back at once instead.
+    RENEWAL_FATAL = frozenset({
+        "AUTH", "IDENTITY", "FORMAT", "CATALOG",
+        "SDK_EXPIRED", "SDK_SEED", "BROWSER_MISSING",
+    })
 
     def _hasattrs(self, *attrs: str) -> bool:
         return all(hasattr(self, attr) for attr in attrs)
@@ -201,13 +209,45 @@ class _AuthState:
             # has already started on it: it does not wait when the proof is past
             # its date. Waiting here is the difference between that costing
             # nothing and it costing a sign-in.
-            logger.info("The stored session has expired; waiting for renewal to replace it")
+            renewal = self._twitch._renewal
+            logger.warning(
+                "The imported session has expired; renewing it before falling"
+                f" back to the saved login (up to {int(self.REVIVE_WAIT)}s)."
+            )
+            self._twitch.gui.login.update("session expired - renewing", None)
             deadline = time() + self.REVIVE_WAIT
+            last_report = time()
             while bundle is None and time() < deadline:
+                if (
+                    renewal is not None
+                    and renewal.failures
+                    and renewal.last_error in self.RENEWAL_FATAL
+                ):
+                    # A probe failure means the minted proof was rejected, not
+                    # that Twitch was briefly unavailable. Sitting here for the
+                    # rest of REVIVE_WAIT only delays the saved login.
+                    logger.warning(
+                        "Session renewal cannot restore the imported session"
+                        f" ({renewal.last_error}); falling back to the saved login."
+                        " Run `login browser` to restore the full campaign list."
+                    )
+                    self._twitch.gui.login.update(
+                        "renewal failed - using the saved login", None
+                    )
+                    break
                 # Raises _ImportReady the moment a renewal lands, which restarts
                 # this whole check against the rewritten file.
                 await self._sleep_or_import(self.SIGN_IN_POLL)
                 bundle = self._load_imported()
+                if bundle is None and time() - last_report >= 15:
+                    last_report = time()
+                    error = renewal.last_error if renewal is not None else None
+                    remaining = max(0, int(deadline - time()))
+                    logger.warning(
+                        "Still waiting for session renewal"
+                        f" (last error: {error or 'attempt in progress'},"
+                        f" {remaining}s left)."
+                    )
         if bundle is None:
             # No usable file: make sure a wake-up for one that never worked does
             # not keep interrupting the device code login.
@@ -744,6 +784,10 @@ class Twitch:
         self._imported_session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
         self._login_endpoint: LoginEndpoint | None = None
+        # Management API and web dashboard; started per run, like the sign-in
+        # endpoint, so a reload cannot leave a port bound to a dead instance.
+        self._api_endpoint: APIEndpoint | None = None
+        self._api_failure: str | None = None
         # Why the last attempt to open a browser sign-in could not be made.
         self._sign_in_failure: str | None = None
         # Set by `login device` to ask for the login this app can do by itself.
@@ -756,7 +800,7 @@ class Twitch:
         self._adopt_task: asyncio.Task | None = None
         if os.environ.get("TDM_GUI") == "1":
             raise ImportError("GUI is not available — install the upstream release.")
-        from cli import CLIManager
+        from twitchdropsminer.cli.cli import CLIManager
         self.gui = CLIManager(self)
         # Storing and watching channels
         self.channels: OrderedDict[int, Channel] = OrderedDict()
@@ -845,6 +889,7 @@ class Twitch:
             enabled=lambda: self.settings.login_server_enabled,
             expected_user_id=self._expected_login_user_id,
             on_finished=self._on_login_finished,
+            proxy=self.browser_proxy(),
         )
         try:
             await endpoint.start()
@@ -867,6 +912,87 @@ class Twitch:
         elif self._login_endpoint is not None:
             await self._login_endpoint.stop()
             self._login_endpoint = None
+
+    async def _start_api_endpoint(self) -> None:
+        """Start the management API when the setting asks for it."""
+        if self._api_endpoint is not None:
+            return
+        if not self.settings.api_enabled:
+            return
+        if not self.settings.api_token:
+            # The token is what keeps other local users out of the dashboard.
+            self.settings.api_token = secrets.token_urlsafe(32)
+            self.settings.save()
+        endpoint = APIEndpoint(self)
+        if not await endpoint.start():
+            self._api_failure = endpoint.error or "bind failed"
+            return
+        self._api_failure = None
+        self._api_endpoint = endpoint
+        self.print(_("cli", "commands", "api_listening").format(url=endpoint.url))
+        elsewhere = [url for url in endpoint.urls if url != endpoint.url]
+        if elsewhere:
+            self.print(_("cli", "commands", "api_lan").format(urls=", ".join(elsewhere)))
+        if not self.settings.api_auth_enabled:
+            logger.warning(
+                "Management API token authentication is DISABLED - anyone who"
+                f" can reach {endpoint.bind_address} can control the miner"
+            )
+            self.print(_("cli", "commands", "api_auth_off_warning"))
+
+    async def _stop_api_endpoint(self) -> None:
+        endpoint, self._api_endpoint = self._api_endpoint, None
+        if endpoint is not None:
+            await endpoint.stop()
+
+    async def apply_api_settings(self) -> None:
+        """Make the running management API match the setting."""
+        await self._stop_api_endpoint()
+        await self._start_api_endpoint()
+
+    async def diagnose_browser(self) -> JsonType:
+        """
+        Start a throwaway headless browser to check that launching one works.
+
+        Renewal and the browser sign-in share this launch path, so when both
+        fail this separates "the browser will not start" from "Twitch rejected
+        the result" without touching the stored session.
+        """
+        executable = find_browser(self.settings.renewal_browser_path)
+        if executable is None:
+            return {
+                "ok": False, "code": "no_browser", "browser": None, "detail": "",
+            }
+        try:
+            async with OwnedChromium(
+                executable, headless=True, startup_timeout=20,
+                proxy=self.browser_proxy(),
+            ).start() as address:
+                return {
+                    "ok": True, "code": None, "browser": executable,
+                    "address": address, "detail": "",
+                }
+        except SessionImportError as error:
+            return {
+                "ok": False, "code": error.code, "browser": executable,
+                "detail": getattr(error, "detail", ""),
+            }
+
+    def api_status(self) -> JsonType:
+        endpoint = self._api_endpoint
+        return {
+            "enabled": bool(self.settings.api_enabled),
+            "listening": endpoint is not None and endpoint.listening,
+            "bind": (
+                endpoint.bind_address if endpoint is not None
+                else f"{self.settings.api_host}:{self.settings.api_port}"
+            ),
+            "url": endpoint.url if endpoint is not None else None,
+            "urls": list(endpoint.urls) if endpoint is not None else [],
+            "error": self._api_failure,
+            "token_set": bool(self.settings.api_token),
+            "auth": bool(self.settings.api_auth_enabled),
+        }
 
     async def start_browser_login(self) -> str | None:
         """
@@ -901,6 +1027,15 @@ class Twitch:
         self._sign_in_failure = None
         self._announce_login_urls(endpoint)
         return None
+
+    def cancel_browser_login(self) -> bool:
+        """Ask a sign-in that is running to stop. True when one was running."""
+        endpoint = self._login_endpoint
+        login = endpoint.login if endpoint is not None else None
+        if login is None:
+            return False
+        login.cancel()
+        return True
 
     def _sign_in_failed(self, reason: str) -> str:
         """Remember why no sign-in could be opened, so it can be reported later."""
@@ -953,6 +1088,31 @@ class Twitch:
         for url in [*urls, *(() if loopback is None else (loopback,))]:
             logger.info(f"Sign in at {url}")
 
+    def browser_proxy(self) -> str:
+        """
+        The proxy the sign-in and renewal browsers should use.
+
+        aiohttp is created with ``trust_env=True``, so the miner itself may be
+        reaching Twitch through HTTPS_PROXY even when ``settings.proxy`` is
+        empty. Chromium does not read those variables on Windows, and its own
+        proxy settings may be unrelated - so mirror what the miner is really
+        using, instead of leaving the browser to connect directly.
+        """
+        configured = str(self.settings.proxy or "").strip()
+        if configured:
+            return configured
+        for name in (
+            "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy",
+            "HTTP_PROXY", "http_proxy",
+        ):
+            value = os.environ.get(name, "").strip()
+            if value:
+                # Chromium calls DNS-over-proxy "socks5", not "socks5h".
+                if value.startswith("socks5h://"):
+                    value = "socks5://" + value[len("socks5h://"):]
+                return value
+        return ""
+
     def _start_renewal(self) -> None:
         """
         Start keeping the imported session alive.
@@ -966,6 +1126,7 @@ class Twitch:
         self._renewal = SessionRenewal(
             browser_path=self.settings.renewal_browser_path,
             on_renewed=self._on_session_renewed,
+            proxy=self.browser_proxy(),
         )
         self._renewal.start()
 
@@ -1209,6 +1370,7 @@ class Twitch:
         if self._login_endpoint is not None:
             await self._login_endpoint.stop()
             self._login_endpoint = None
+        await self._stop_api_endpoint()
         if self._watching_task is not None:
             self._watching_task.cancel()
             self._watching_task = None
@@ -1335,6 +1497,7 @@ class Twitch:
         # takes the user to approve it, and a browser sign-in arriving is one
         # of the ways out of it.
         await self._start_login_endpoint()
+        await self._start_api_endpoint()
         self._start_renewal()
         auth_state = await self.get_auth()
         await self.websocket.start()
@@ -2045,15 +2208,22 @@ class Twitch:
                 await asyncio.wait_for(self.gui.wait_until_closed(), timeout=delay)
 
     @overload
-    async def gql_request(self, ops: GQLOperation) -> JsonType:
+    async def gql_request(
+        self, ops: GQLOperation, *, deactivate_on_integrity: bool = True
+    ) -> JsonType:
         ...
 
     @overload
-    async def gql_request(self, ops: list[GQLOperation]) -> list[JsonType]:
+    async def gql_request(
+        self, ops: list[GQLOperation], *, deactivate_on_integrity: bool = True
+    ) -> list[JsonType]:
         ...
 
     async def gql_request(
-        self, ops: GQLOperation | list[GQLOperation]
+        self,
+        ops: GQLOperation | list[GQLOperation],
+        *,
+        deactivate_on_integrity: bool = True,
     ) -> JsonType | list[JsonType]:
         gql_logger.debug(f"GQL Request: {ops}")
         backoff = ExponentialBackoff(maximum=60)
@@ -2106,6 +2276,22 @@ class Twitch:
                                     data_dict = data_dict[key]
                                 data_dict[path[-1]] = None
                                 break
+                            elif (
+                                error_dict["message"] == "failed integrity check"
+                                and not deactivate_on_integrity
+                            ):
+                                # Twitch gates the campaign catalogue harder than
+                                # the in-progress inventory. A renewed or captured
+                                # session can answer Inventory but be refused here;
+                                # that must not throw away a session that can still
+                                # mine. The caller decides whether the empty
+                                # catalogue is acceptable.
+                                logger.warning(
+                                    "This session cannot read the campaign catalog"
+                                    " (failed integrity check); keeping it for"
+                                    " in-progress campaigns"
+                                )
+                                raise GQLException(response_json["errors"])
                             elif error_dict["message"] in (
                                 "failed integrity check",
                                 "invalid oauth token",
@@ -2173,14 +2359,23 @@ class Twitch:
     ) -> dict[str, JsonType]:
         campaign_ids: dict[str, JsonType] = dict(campaigns_chunk)
         auth_state = await self.get_auth()
-        response_list: list[JsonType] = await self.gql_request(
-            [
-                GQL_QUERIES["CampaignDetails"].with_variables(
-                    {"channelLogin": str(auth_state.user_id), "dropID": cid}
-                )
-                for cid in campaign_ids
-            ]
-        )
+        try:
+            response_list: list[JsonType] = await self.gql_request(
+                [
+                    GQL_QUERIES["CampaignDetails"].with_variables(
+                        {"channelLogin": str(auth_state.user_id), "dropID": cid}
+                    )
+                    for cid in campaign_ids
+                ],
+                deactivate_on_integrity=False,
+            )
+        except GQLException:
+            # Same catalog gate as the list query: keep the in-progress data
+            # instead of discarding a session that can still mine.
+            logger.warning(
+                "Could not load campaign details; using the in-progress data"
+            )
+            return campaign_ids
         fetched_data: dict[str, JsonType] = {
             (campaign_data := response_json["data"]["user"]["dropCampaign"])["id"]: campaign_data
             for response_json in response_list
@@ -2200,8 +2395,18 @@ class Twitch:
         }
         inventory_data: dict[str, JsonType] = {c["id"]: c for c in ongoing_campaigns}
         # fetch general available campaigns data (campaigns)
-        response = await self.gql_request(GQL_QUERIES["Campaigns"])
-        available_list: list[JsonType] = response["data"]["currentUser"]["dropCampaigns"] or []
+        try:
+            response = await self.gql_request(
+                GQL_QUERIES["Campaigns"], deactivate_on_integrity=False
+            )
+        except GQLException:
+            available_list: list[JsonType] = []
+            logger.warning(
+                "Could not refresh the campaign catalog; continuing with"
+                " campaigns already in progress"
+            )
+        else:
+            available_list = response["data"]["currentUser"]["dropCampaigns"] or []
         if available_list:
             self._no_campaigns_warned = False
         elif not self._no_campaigns_warned:

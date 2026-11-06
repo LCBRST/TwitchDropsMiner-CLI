@@ -58,7 +58,7 @@ chmod +x ./TwitchDropsMiner-CLI_Linux && ./TwitchDropsMiner-CLI_Linux   # Linux
 把脚本下载下来跑一遍就行：
 
 ```bash
-wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/tools/install_linux.sh
 chmod +x install_linux.sh
 ./install_linux.sh
 ```
@@ -245,16 +245,18 @@ login renew
 
 `help` 会列出全部，这里是完整的一份。
 
-**通用** —— `help [命令]`、`status`、`version`、`log [N]`、`clear`、
+**通用** —— `help [命令]`、`status`、`version`、`log [N]`、`copy [N]`、`clear`、
 `exit` / `quit` / `q`
 
-**登录** —— `whoami`、`login [browser|status|cancel|renew|device]`
+**登录** —— `whoami`、`login [browser|status|cancel|renew|device|doctor]`
 
 **挂机控制** —— `pause`、`resume`、`reload`、`watch <频道登录名>`、`unwatch`、`claim`
 
 **进度** —— `inventory`（别名 `inv`）、`campaigns`、`drops`
 
 **频道** —— `channels [--all]`、`online`
+
+**接口** —— `api [status|on|off|auth|open|copy|file|token|rotate]`
 
 **设置** —— 下面这些都会写进 `settings.json`：
 
@@ -271,6 +273,38 @@ login renew
 
 **调试** —— `level <级别>`、`dump [on|off]`
 
+## 网页控制台
+
+矿工还可以在挖宝的同时提供一个管理页面。默认关闭；启用后监听所有网卡，
+同一局域网里的手机或其他电脑也能打开：
+
+```
+api on        # :8091，打印局域网地址并生成口令
+api open      # 在本机直接打开已登录的控制台
+api status    # 查看从其他设备访问要用的局域网地址
+```
+
+想把口令自己粘贴的话，`api copy` 会复制到剪贴板；`api token` 则直接显示，
+`api token <新口令>` 可以自定义。默认每个 `/api` 请求都要带口令；`api auth off`
+（或 `set api_auth_enabled false`）后网页会直接进入、不再要求口令 —— 这等于把
+矿工交给任何能访问该端口的人，只建议在可信网络里这样做。
+
+SSH 下 `api copy` 和 `copy [N]` 使用 OSC 52，由终端负责剪贴板。如果终端不支持，
+`copy [N]` 会写 `copy.txt`，`api file` 会把口令写到数据目录的 `api-token.txt`
+（权限 600），用 scp 取回即可。
+
+页面里能看实时进度、频道、活动、设置和日志，也可以暂停/继续、手动选频道、
+领取掉宝、修改设置。Twitch 登录面板在设置页：在网页里发起浏览器登录，并通过
+**内嵌画面**直接操作登录浏览器（页面通过控制台自己的端口代理，不需要再转发
+8090），也可以在网页里续签会话。
+
+掉宝奖励图和活动封面缓存在 `cache/images/`，由矿工本地提供，不依赖 Twitch CDN；
+活动从库存消失后相关图片会自动清理。
+
+前端在 [TwitchDropMiner_WebAddon](https://github.com/LCBRST/TwitchDropMiner_WebAddon)
+仓库，HTTP 接口见它的 `API.md`。接口可以控制矿工；在不完全信任的网络里，
+请把 `api_host` 设回 `127.0.0.1`。
+
 ## 文件
 
 都在可执行文件旁边（源码安装的话就是仓库根目录）。
@@ -282,6 +316,7 @@ login renew
 | `imported-session.json` | 从登录浏览器里捕获的会话 —— **同样是凭据** |
 | `lock.file` | 单实例锁，崩溃后可以手动删掉 |
 | `log/` | 按时间戳命名的日志，以及命令历史 |
+| `cache/images/` | 控制台图片缓存，可安全删除，需要时会重新下载 |
 
 想迁移到别的机器，把 `cookies.jar` 和 `imported-session.json` 一起带走就行。
 两个都是凭据，别外传，更别提交到仓库。
@@ -366,28 +401,19 @@ quality 2
 只有准备改代码才需要看这段。
 
 ```
-              +---------------------+        +-----------------------+
-              |  twitch.py 引擎     |  调用  |   gui 接口            |
-              | (状态机、GQL、       +------->|   (tray, status,     |
-              |  websockets)        |        |    channels, inv,    |
-              +----------+----------+        |    progress, login)  |
-                         |                   +----------+-----------+
-                         | self.gui = ...               |
-                         |                              |
-              +----------v----------+        +----------v-----------+
-              |  cli.CLIManager     |        |  gui.GUIManager      |
-              |  （默认）           |  XOR   |  (TDM_GUI=1)         |
-              |                     |        |                      |
-              |  + 交互式 shell     |        |  + tk/pystray 控件   |
-              +----------+----------+        +----------------------+
-                         |
-              +----------v----------+
-              |  commands.py        |
-              |  CommandRegistry    |
-              +---------------------+
+main.py                    入口、参数、看门狗
+twitchdropsminer/
+  common/                  常量、设置、翻译、工具、异常
+  core/                    twitch.py 引擎（状态机、GQL、websockets）、
+                           channel.py、inventory.py、websocket.py
+  auth/                    浏览器登录、会话导入/续签、登录服务
+  web/                     管理接口、图片缓存
+  cli/                     cli.py CLIManager、commands.py CommandRegistry
+tools/                     构建、安装、清理、网页同步脚本
+lang/ webui/ docs/         数据与文档
 ```
 
-引擎从不直接 import `cli` 或 `commands`，只调 `self.gui.*`。`CLIManager` 把引擎用到的
+引擎从不直接 import CLI 或命令模块，只调 `self.gui.*`。`CLIManager` 把引擎用到的
 方法全实现了一遍：`tray.change_icon`、`status.update`、
 `channels.set_watching/clear/display`、`progress.display`、`inv.add_campaign`、
 `websockets.update`、`login.ask_login`、`login.ask_enter_code`、`set_games`、
@@ -395,7 +421,7 @@ quality 2
 `close_window`、`prevent_close`、`grab_attention`、`coro_unless_closed`、
 `wait_until_closed`、`running`、`close_requested`。
 
-新增命令在 `commands.py` 的 `_register_builtins()` 里注册。
+新增命令在 `twitchdropsminer/cli/commands.py` 的 `_register_builtins()` 里注册。
 
 ## 致谢
 

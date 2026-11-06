@@ -2,16 +2,17 @@
 # Compile TwitchDropsMiner CLI into a single-file binary via PyInstaller.
 #
 # Usage:
-#   ./build_cli.sh                    # build single-file CLI binary -> dist/
-#   ./build_cli.sh --one-dir          # one-folder build (faster startup)
-#   ./build_cli.sh --upx              # use UPX compression (smaller, slower)
-#   ./build_cli.sh --clean            # remove dist/ build/ first
-#   ./build_cli.sh --name <name>      # override binary name
-#   ./build_cli.sh --venv <path>      # use a different venv (default: ./venv)
+#   ./tools/build_cli.sh                    # build single-file CLI binary -> dist/
+#   ./tools/build_cli.sh --one-dir          # one-folder build (faster startup)
+#   ./tools/build_cli.sh --upx              # use UPX compression (smaller, slower)
+#   ./tools/build_cli.sh --clean            # remove dist/ build/ first
+#   ./tools/build_cli.sh --name <name>      # override binary name
+#   ./tools/build_cli.sh --venv <path>      # use a different venv (default: ./venv)
 
 set -euo pipefail
 
-dirpath=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+dirpath=$(cd -- "$script_dir/.." && pwd)
 cd "$dirpath"
 
 # Defaults
@@ -68,7 +69,7 @@ if [[ "$do_clean" -eq 1 ]]; then
 fi
 
 echo ">> building (one_file=$ONE_FILE, exclude_gui=$EXCLUDE_GUI, upx=$USE_UPX, name=$APP_NAME)"
-"$PYI" --noconfirm --clean build_cli.spec
+"$PYI" --noconfirm --clean "$script_dir/build_cli.spec"
 
 # Report
 if [[ "$ONE_FILE" = "1" ]]; then

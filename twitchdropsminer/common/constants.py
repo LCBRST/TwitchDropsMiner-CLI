@@ -12,13 +12,15 @@ from typing import Any, Dict, Literal, NewType, TYPE_CHECKING
 
 from yarl import URL
 
-from version import __version__
+from twitchdropsminer.common.version import __version__
 
 if TYPE_CHECKING:
     from collections import abc  # noqa
     from typing_extensions import TypeAlias
 
 
+# The checkout/install root: this file lives in <root>/twitchdropsminer/common.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # True if we're running from a built EXE (or a Linux AppImage), False inside a dev build
 IS_APPIMAGE = "APPIMAGE" in os.environ and os.path.exists(os.environ["APPIMAGE"])
 IS_PACKAGED = hasattr(sys, "_MEIPASS") or IS_APPIMAGE
@@ -53,7 +55,8 @@ def _resource_path(relative_path: Path | str) -> Path:
         meipass: str = getattr(sys, "_MEIPASS")
         base_path = Path(meipass)
     else:
-        base_path = WORKING_DIR
+        # The source tree, independent of the current working directory.
+        base_path = PROJECT_ROOT
     return base_path.joinpath(relative_path)
 
 
@@ -90,7 +93,7 @@ else:
     # detect these and use __file__ and main.py redirection instead
     SELF_PATH = Path(sys.argv[0]).resolve()
     if SELF_PATH.stem == "pyinstaller" or SELF_PATH.name == "gui.py":
-        SELF_PATH = Path(__file__).with_name("main.py").resolve()
+        SELF_PATH = (PROJECT_ROOT / "main.py").resolve()
 WORKING_DIR = SELF_PATH.parent
 # Development paths
 VENV_PATH = Path(WORKING_DIR, "env")

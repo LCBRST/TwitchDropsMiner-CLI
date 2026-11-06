@@ -20,6 +20,7 @@ import shutil
 import signal
 import sys
 import tempfile
+from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -28,7 +29,7 @@ from typing import Any, Protocol
 import aiohttp
 from yarl import URL
 
-from session_import import SessionImportError
+from twitchdropsminer.auth.session_import import SessionImportError
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -63,7 +64,7 @@ def find_browser(explicit: str = "") -> str | None:
             if not base:
                 continue
             candidates.append(Path(base, "Google", "Chrome", "Application", "chrome.exe"))
-        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+        for variable in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
             base = os.environ.get(variable)
             if not base:
                 continue
@@ -270,13 +271,23 @@ class OwnedChromium:
     """Own a temporary profile and process group; never attach to a user's browser."""
 
     def __init__(
-        self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 20,
+        self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 40,
         headless: bool = True, extra_args: Sequence[str] = (),
         env: Mapping[str, str] | None = None, profile_prefix: str = "tdm-renew-",
+        proxy: str = "", user_agent: str = "",
     ):
         self.executable: str = executable
         self.no_sandbox: bool = no_sandbox
         self.startup_timeout: float = startup_timeout
+        # A headless browser advertises "HeadlessChrome" in its default user
+        # agent, and Twitch's integrity issuance is exactly the kind of thing
+        # that refuses to mint for it. Renewal passes the user agent captured
+        # with the session so the context stays the one Twitch accepted.
+        self.user_agent: str = user_agent
+        # The browser does not read the miner's requests' proxy setting, so it
+        # has to be handed over explicitly; Twitch's SDK and integrity endpoint
+        # are unreachable for a browser behind a proxy that is not told about it.
+        self.proxy: str = proxy
         # Renewal mints a proof and never needs a window; an interactive login
         # is the opposite - a visible page is the whole point, and a headless
         # one is exactly what Twitch's risk checks look for.
@@ -372,9 +383,38 @@ class OwnedChromium:
         if interrupted:
             raise asyncio.CancelledError
 
+    @staticmethod
+    def _log_start_failure(
+        error: SessionImportError, profile: Path, tail: deque[str]
+    ) -> None:
+        detail = " | ".join(tail)
+        # Carried on the exception so a diagnostic command can show it too.
+        error.detail = detail  # type: ignore[attr-defined]
+        logger.warning(
+            f"Browser start failed ({error.code}) using profile {profile}"
+            + (f" - {detail}" if detail else " - the browser produced no output")
+        )
+
     @asynccontextmanager
     async def start(self) -> AsyncIterator[str]:
         process = None
+        # Chrome's own diagnostics are the only clue when it refuses to open
+        # the debugging port (a policy, a wrapper script, a missing DLL). Keep
+        # a bounded tail and only surface it when starting fails.
+        tail: deque[str] = deque(maxlen=25)
+
+        async def drain(stream: asyncio.StreamReader) -> None:
+            while True:
+                try:
+                    line = await stream.readline()
+                except (asyncio.CancelledError, OSError):
+                    return
+                if not line:
+                    return
+                text = line.decode("utf8", "replace").rstrip()
+                if text:
+                    tail.append(text)
+
         # Windows refuses to delete files a process still holds, and Chrome can
         # lag behind its own exit - a cleanup failure there must not turn into a
         # renewal failure.
@@ -392,7 +432,10 @@ class OwnedChromium:
                 "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
                 "--no-first-run", "--no-default-browser-check", "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--enable-logging=stderr",
                 *(() if self.headless else ("--window-size=1280,900", "--window-position=0,0")),
+                *((f"--proxy-server={self.proxy}",) if self.proxy else ()),
+                *((f"--user-agent={self.user_agent}",) if self.user_agent else ()),
                 *self.extra_args,
                 "about:blank",
             ]
@@ -400,19 +443,43 @@ class OwnedChromium:
                 args.insert(1, "--headless=new")
             if self.no_sandbox:
                 args.insert(1, "--no-sandbox")
+            drain_task: asyncio.Task | None = None
             try:
+                logger.info(
+                    f"Starting the {'headless' if self.headless else 'sign-in'}"
+                    f" browser: {self.executable}"
+                )
+                if self.proxy:
+                    # Never put proxy credentials in the log.
+                    logger.info(
+                        "Browser proxy: "
+                        + re.sub(r"//[^/@]+@", "//", self.proxy)
+                    )
                 process = await asyncio.create_subprocess_exec(
-                    *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
                     start_new_session=os.name == "posix",
                     **({} if self.env is None else {"env": {**os.environ, **self.env}}),
                 )
+                if process.stderr is not None:
+                    drain_task = asyncio.create_task(drain(process.stderr))
                 try:
                     address = await self.wait_ready(process, profile)
+                except SessionImportError as error:
+                    self._log_start_failure(error, profile, tail)
+                    raise
                 except (OSError, ValueError, TimeoutError):
-                    raise SessionImportError("BROWSER_START") from None
+                    error = SessionImportError("BROWSER_START")
+                    self._log_start_failure(error, profile, tail)
+                    raise error from None
                 yield address
             except OSError:
-                raise SessionImportError("BROWSER_START") from None
+                error = SessionImportError("BROWSER_START")
+                self._log_start_failure(error, profile, tail)
+                raise error from None
             finally:
+                if drain_task is not None:
+                    drain_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await drain_task
                 if process is not None:
                     await self.finish_stop(process)

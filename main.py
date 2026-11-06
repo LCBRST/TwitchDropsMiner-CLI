@@ -68,7 +68,7 @@ def _watchdog_supervise() -> int:
 
         ran = time.monotonic() - start
         try:
-            from constants import LOG_DIR
+            from twitchdropsminer.common.constants import LOG_DIR
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             with open(LOG_DIR / "restart.log", "a", encoding="utf8") as fh:
                 fh.write(
@@ -102,14 +102,14 @@ if __name__ == "__main__":
     except ImportError:
         pass
 
-    from translate import _
-    from twitch import Twitch
-    from settings import Settings
-    from version import __version__
-    from exceptions import CaptchaRequired, ReloadRequest, SignInRequired
-    from login_server import start_reason
-    from utils import lock_file
-    from constants import LOGGING_LEVELS, FILE_FORMATTER, LOG_DIR, LOCK_PATH
+    from twitchdropsminer.common.translate import _
+    from twitchdropsminer.core.twitch import Twitch
+    from twitchdropsminer.common.settings import Settings
+    from twitchdropsminer.common.version import __version__
+    from twitchdropsminer.common.exceptions import CaptchaRequired, ReloadRequest, SignInRequired
+    from twitchdropsminer.auth.login_server import start_reason
+    from twitchdropsminer.common.utils import lock_file
+    from twitchdropsminer.common.constants import LOGGING_LEVELS, FILE_FORMATTER, LOG_DIR, LOCK_PATH
 
     warnings.simplefilter("default", ResourceWarning)
 
@@ -174,7 +174,7 @@ if __name__ == "__main__":
         sys.exit(4)
 
     def _seed_token(token_path: str) -> None:
-        from constants import COOKIES_PATH, CLIENT_TYPE_PREFERENCE
+        from twitchdropsminer.common.constants import COOKIES_PATH, CLIENT_TYPE_PREFERENCE
         with open(token_path, "r", encoding="utf8") as fh:
             token = fh.read().strip()
         if not token:

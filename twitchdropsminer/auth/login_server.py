@@ -30,11 +30,11 @@ import aiohttp
 from aiohttp import web
 from yarl import URL
 
-from browser_login import BrowserLogin
-from constants import IMPORTED_SESSION_PATH
-from session_import import SessionImportError
-from translate import _
-from utils import WILDCARD_HOSTS, local_ipv4_addresses
+from twitchdropsminer.auth.browser_login import BrowserLogin
+from twitchdropsminer.common.constants import IMPORTED_SESSION_PATH
+from twitchdropsminer.auth.session_import import SessionImportError
+from twitchdropsminer.common.translate import _
+from twitchdropsminer.common.utils import WILDCARD_HOSTS, local_ipv4_addresses
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -283,9 +283,13 @@ class LoginEndpoint:
         enabled: Callable[[], bool], expected_user_id: Callable[[], int | None] = lambda: None,
         on_finished: Callable[[str, str | None], None] = lambda state, detail: None,
         clock: Callable[[], float] = time, session_file: Path = IMPORTED_SESSION_PATH,
+        proxy: str = "",
     ):
         self.host: str = host
         self.port: int = port
+        # The browser is a separate network client; without this it would not
+        # follow the proxy the miner itself was told to use.
+        self._proxy: str = proxy
         self.login: BrowserLogin | None = None
         self.on_accepted = on_accepted
         self.enabled = enabled
@@ -397,7 +401,7 @@ class LoginEndpoint:
         self.login = BrowserLogin(
             executable=executable, on_accepted=self.on_accepted,
             expected_user_id=self.expected_user_id, clock=self.clock,
-            session_file=self._session_file,
+            session_file=self._session_file, proxy=self._proxy,
         )
         self._task = asyncio.create_task(self._run())
 

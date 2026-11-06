@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>TwitchDropsMiner Console</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <section id="gate" class="gate" hidden>
+    <form id="gate-form" class="gate-card">
+      <div class="gate-mark">TD</div>
+      <h1>TwitchDropsMiner</h1>
+      <p class="muted" data-i18n="gate_hint">Enter the management token shown by <code>api token</code> in the miner's console.</p>
+      <input id="gate-token" type="password" autocomplete="off" spellcheck="false"
+             placeholder="API token" data-i18n-placeholder="token_placeholder" required>
+      <label class="check">
+        <input id="gate-remember" type="checkbox" checked>
+        <span data-i18n="remember">Remember on this browser</span>
+      </label>
+      <button type="submit" class="primary" data-i18n="connect">Connect</button>
+      <p id="gate-error" class="error" role="alert" hidden></p>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-name">TwitchDropsMiner</span>
+        <span id="version" class="badge muted-badge"></span>
+      </div>
+      <div class="chips">
+        <span id="chip-auth" class="chip warn" hidden></span>
+        <span id="chip-state" class="chip">…</span>
+        <span id="chip-login" class="chip">…</span>
+        <span id="chip-watching" class="chip">…</span>
+        <span id="chip-uptime" class="chip">…</span>
+      </div>
+      <div class="topbar-actions">
+        <select id="lang-select" class="compact" aria-label="Language">
+          <option value="en">English</option>
+          <option value="zh-CN">简体中文</option>
+          <option value="zh-TW">繁體中文</option>
+        </select>
+        <button id="theme-toggle" class="icon" type="button" title="Theme">◐</button>
+        <button id="disconnect" class="ghost" type="button" data-i18n="disconnect">Disconnect</button>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button type="button" data-tab="overview" class="active" data-i18n="tab_overview">Overview</button>
+      <button type="button" data-tab="inventory" data-i18n="tab_inventory">Drops inventory</button>
+      <button type="button" data-tab="channels" data-i18n="tab_channels">Channels</button>
+      <button type="button" data-tab="campaigns" data-i18n="tab_campaigns">Campaigns</button>
+      <button type="button" data-tab="settings" data-i18n="tab_settings">Settings</button>
+      <button type="button" data-tab="logs" data-i18n="tab_logs">Logs</button>
+    </nav>
+
+    <main>
+      <section id="tab-overview" class="tab active">
+        <div class="stats">
+          <article class="stat"><span class="stat-label" data-i18n="campaigns">Campaigns</span><strong id="stat-campaigns">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="active_campaigns">Active</span><strong id="stat-active">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="claimed_drops">Claimed drops</span><strong id="stat-claimed">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="ready_drops">Ready to claim</span><strong id="stat-ready">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="channels">Channels</span><strong id="stat-channels">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="websockets">Websockets</span><strong id="stat-ws">—</strong></article>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head"><h2 data-i18n="current_drop">Current drop</h2><span id="current-game" class="muted"></span></div>
+          <div id="current-drop" class="drop-live"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2 data-i18n="quick_actions">Quick actions</h2></div>
+          <div class="actions">
+            <button type="button" id="toggle-mining" class="primary">Pause</button>
+            <button type="button" data-action="refresh" data-i18n="refresh_inventory">Refresh inventory</button>
+            <button type="button" data-action="unwatch" data-i18n="unwatch">Stop watching</button>
+            <button type="button" data-action="claim" data-i18n="claim">Claim ready drops</button>
+            <button type="button" data-action="exit" class="danger" data-i18n="exit">Exit miner</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2 data-i18n="account">Account &amp; session</h2></div>
+          <div id="account-info" class="kv"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2 data-i18n="wanted_games">Wanted games</h2></div>
+          <div id="wanted-games" class="pill-row"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2 data-i18n="websockets">Websockets</h2></div>
+          <div id="ws-list" class="ws-list"></div>
+        </section>
+      </section>
+
+      <section id="tab-inventory" class="tab">
+        <div class="stats maybe-six">
+          <article class="stat"><span class="stat-label" data-i18n="drops_total">Drops</span><strong id="inv-total">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="drops_in_progress">In progress</span><strong id="inv-progress">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="ready_drops">Ready to claim</span><strong id="inv-ready">—</strong></article>
+          <article class="stat"><span class="stat-label" data-i18n="claimed_drops">Claimed</span><strong id="inv-claimed">—</strong></article>
+        </div>
+        <div class="toolbar">
+          <input id="inventory-search" type="search" placeholder="Search drops" data-i18n-placeholder="search_drops">
+          <select id="inventory-status" class="compact">
+            <option value="progress" selected data-i18n="drops_in_progress">In progress</option>
+            <option value="ready" data-i18n="ready_drops">Ready to claim</option>
+            <option value="claimed" data-i18n="claimed_drops">Claimed</option>
+            <option value="locked" data-i18n="drops_locked">Locked</option>
+            <option value="all" data-i18n="filter_all">All</option>
+          </select>
+          <select id="inventory-game" class="compact">
+            <option value="" data-i18n="all_games">All games</option>
+          </select>
+          <button type="button" id="inventory-refresh" data-i18n="refresh">Refresh</button>
+        </div>
+        <div id="inventory-list" class="list"></div>
+      </section>
+
+      <section id="tab-channels" class="tab">
+        <div class="toolbar">
+          <input id="channel-search" type="search" placeholder="Search channels" data-i18n-placeholder="search_channels">
+          <label class="check"><input id="channels-online" type="checkbox" checked><span data-i18n="online_only">Online only</span></label>
+          <label class="check"><input id="channels-watchable" type="checkbox"><span data-i18n="watchable_only">Watchable only</span></label>
+          <button type="button" id="channels-refresh" data-i18n="refresh">Refresh</button>
+        </div>
+        <div id="channel-list" class="list"></div>
+      </section>
+
+      <section id="tab-campaigns" class="tab">
+        <div class="toolbar">
+          <input id="campaign-search" type="search" placeholder="Search campaigns" data-i18n-placeholder="search_campaigns">
+          <select id="campaign-filter" class="compact">
+            <option value="active" data-i18n="filter_active">Active</option>
+            <option value="wanted" data-i18n="filter_wanted">Wanted games</option>
+            <option value="all" data-i18n="filter_all">All</option>
+          </select>
+          <button type="button" id="campaigns-refresh" data-i18n="refresh">Refresh</button>
+        </div>
+        <div id="campaign-list" class="list"></div>
+      </section>
+
+      <section id="tab-settings" class="tab">
+        <section class="panel">
+          <div class="panel-head"><h2 data-i18n="settings_mining">Mining</h2></div>
+          <div id="settings-form" class="form"></div>
+          <div class="actions">
+            <button type="button" id="settings-save" class="primary" data-i18n="save">Save</button>
+            <span id="settings-status" class="muted"></span>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2 data-i18n="signin_panel">Twitch sign-in</h2>
+            <span id="signin-state" class="muted"></span>
+          </div>
+          <div id="signin-info" class="kv"></div>
+          <div class="actions">
+            <button type="button" id="signin-browser" class="primary" data-i18n="signin_browser">Sign in with browser</button>
+            <button type="button" id="signin-renew" data-i18n="signin_renew">Renew session</button>
+            <button type="button" id="signin-cancel" class="danger" data-i18n="signin_cancel" hidden>Cancel sign-in</button>
+            <a id="signin-open" class="button primary" target="_blank" rel="noopener" data-i18n="signin_open" hidden>Open sign-in page</a>
+          </div>
+          <p id="signin-hint" class="muted"></p>
+          <div id="signin-viewer" class="signin-viewer" hidden>
+            <iframe id="signin-frame" title="Twitch sign-in"
+                    allow="clipboard-read; clipboard-write"></iframe>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2 data-i18n="api_info">API</h2></div>
+          <div id="api-info" class="kv"></div>
+        </section>
+      </section>
+
+      <section id="tab-logs" class="tab">
+        <div class="toolbar">
+          <label class="check"><input id="log-follow" type="checkbox" checked><span data-i18n="follow">Follow</span></label>
+          <button type="button" id="log-clear" data-i18n="clear_view">Clear view</button>
+        </div>
+        <pre id="log-view" class="logs" aria-live="polite"></pre>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span data-i18n="footer">TwitchDropsMiner web add-on</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="assets/app.js" defer></script>
+</body>
+</html>

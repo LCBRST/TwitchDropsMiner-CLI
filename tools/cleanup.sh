@@ -2,14 +2,14 @@
 # Removes upstream files that the CLI build no longer needs.
 #
 # Usage:
-#   ./cleanup.sh             # interactive: shows what will go, asks to confirm
-#   ./cleanup.sh --dry-run   # just print, don't delete
-#   ./cleanup.sh --yes       # delete without prompting
-#   ./cleanup.sh --purge-gui # ALSO remove gui.py / cache.py / icons/ (no GUI fallback)
+#   ./tools/cleanup.sh             # interactive: shows what will go, asks to confirm
+#   ./tools/cleanup.sh --dry-run   # just print, don't delete
+#   ./tools/cleanup.sh --yes       # delete without prompting
+#   ./tools/cleanup.sh --purge-gui # ALSO remove gui.py / cache.py / icons/ (no GUI fallback)
 
 set -euo pipefail
 
-dirpath=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+dirpath=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 dry_run=0
 auto_yes=0
@@ -33,7 +33,6 @@ done
 # Always-cleanup targets: Windows-only / dev-only / build artifacts.
 # Paths are relative to the project root.
 core_targets=(
-    "build.bat"
     "build.sh"
     "build.spec"
     "pack.bat"

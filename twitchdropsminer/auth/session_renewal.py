@@ -19,19 +19,20 @@ import json
 import logging
 import os
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from time import time
 from typing import Any
 
 import aiohttp
 
-from browser_cdp import (
+from twitchdropsminer.auth.browser_cdp import (
     INTEGRITY_URL,
     OwnedChromium,
     browser_target,
     find_browser,
 )
-from session_import import (
+from twitchdropsminer.auth.session_import import (
     SDKCookie,
     ServerSeed,
     SessionBundle,
@@ -39,7 +40,7 @@ from session_import import (
     probe_bundle,
     SessionImportError,
 )
-from constants import IMPORTED_SESSION_PATH
+from twitchdropsminer.common.constants import IMPORTED_SESSION_PATH
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -92,6 +93,11 @@ class SDKExchange:
             method, params = event["method"], event["params"]
             request_id = params.get("requestId")
             if len(self.posts) + len(self.responses) + len(self.cached) > 256:
+                logger.warning(
+                    "Integrity capture hit its limit:"
+                    f" {len(self.posts)} posts, {len(self.responses)} responses,"
+                    f" {len(self.cached)} cached"
+                )
                 raise SessionImportError("CAPTURE_LIMIT")
             if method == "Fetch.requestPaused":
                 request = params["request"]
@@ -100,6 +106,11 @@ class SDKExchange:
                     or request.get("method") != "GET"
                     or params.get("resourceType") != "Document"
                 ):
+                    logger.warning(
+                        "Integrity page intercepted a different request:"
+                        f" {request.get('method')} {request.get('url')}"
+                        f" ({params.get('resourceType')})"
+                    )
                     raise SessionImportError("SDK_PAGE")
                 await protocol.command("Fetch.fulfillRequest", {
                     "requestId": request_id, "responseCode": 200,
@@ -114,11 +125,22 @@ class SDKExchange:
                 request = params["request"]
                 if request.get("url") == INTEGRITY_URL and request.get("method") == "POST":
                     self.posts.add(request_id)
+            elif method == "Log.entryAdded":
+                entry = params.get("entry") or {}
+                if entry.get("level") in ("error", "warning"):
+                    text = str(entry.get("text") or "")[:500]
+                    if text:
+                        logger.warning(f"Browser console: {text}")
             elif method == "Network.requestServedFromCache":
                 self.cached.add(request_id)
             elif method == "Network.responseReceived" and request_id in self.posts:
                 self.responses[request_id] = params["response"]
             elif method == "Network.loadingFailed" and request_id in self.posts:
+                logger.warning(
+                    "Integrity request failed in the browser:"
+                    f" {params.get('errorText') or 'no reason'}"
+                    f" (blocked: {params.get('blockedReason') or 'no'})"
+                )
                 raise SessionImportError("SDK_ISSUANCE")
             elif method == "Network.loadingFinished" and request_id in self.posts:
                 response = self.responses.get(request_id, {})
@@ -129,6 +151,13 @@ class SDKExchange:
                     or response.get("fromServiceWorker")
                     or request_id in self.cached
                 ):
+                    logger.warning(
+                        "Integrity request had an unusable response:"
+                        f" url={response.get('url')} status={response.get('status')}"
+                        f" disk_cache={bool(response.get('fromDiskCache'))}"
+                        f" service_worker={bool(response.get('fromServiceWorker'))}"
+                        f" replayed={request_id in self.cached}"
+                    )
                     raise SessionImportError("SDK_ISSUANCE")
                 data = await protocol.body(request_id)
                 if not self.proof.done():
@@ -141,6 +170,8 @@ class SDKAcquisition:
     EVENTS = frozenset({
         "Fetch.requestPaused", "Page.loadEventFired",
         "Network.requestServedFromCache", "Network.loadingFailed",
+        # CORS and other browser-side rejections only explain themselves here.
+        "Log.entryAdded",
     })
     SCRIPT = """async function(headers, sdk) {
       return await new Promise(resolve => {
@@ -156,10 +187,10 @@ class SDKAcquisition:
               signal: AbortSignal.timeout(30000)
             });
             finish({status: r.status, data: await r.json()});
-          } catch (_) { finish({failure: 'issuance_fetch'}); }
+          } catch (e) { finish({failure: 'issuance_fetch', detail: String(e)}); }
         }, {once: true});
         const script = document.createElement('script');
-        script.onerror = () => finish({failure: 'sdk_script'});
+        script.onerror = () => finish({failure: 'sdk_script', detail: script.src});
         script.src = sdk;
         document.body.appendChild(script);
       });
@@ -178,6 +209,9 @@ class SDKAcquisition:
                 self._run(protocol, original, cookie, initial=initial), self.timeout
             )
         except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                f"Integrity issuance timed out after {self.timeout:.0f}s"
+            )
             raise SessionImportError("SDK_TIMEOUT") from None
         except (KeyError, TypeError, ValueError, AttributeError):
             raise SessionImportError("BROWSER_PROTOCOL") from None
@@ -208,6 +242,19 @@ class SDKAcquisition:
         previous_cookie: SDKCookie | None, *, initial: bool,
     ) -> ServerSeed:
         await protocol.command("Network.enable")
+        # Console errors are the only place a CORS rejection names itself.
+        with suppress(SessionImportError, asyncio.TimeoutError):
+            await protocol.command("Log.enable")
+        # Belt and braces with the --user-agent launch flag: a proof is issued
+        # for the context it was requested from, and a headless user agent is
+        # not the one the captured session used.
+        await protocol.command("Network.setUserAgentOverride", {
+            "userAgent": original.user_agent,
+            **(
+                {"acceptLanguage": original.headers["accept-language"]}
+                if original.headers.get("accept-language") else {}
+            ),
+        })
         await protocol.command("Network.setCacheDisabled", {"cacheDisabled": True})
         await protocol.command("Network.setBypassServiceWorker", {"bypass": True})
         if previous_cookie is not None:
@@ -235,12 +282,28 @@ class SDKAcquisition:
             "awaitPromise": True, "returnByValue": True,
         }, timeout=self.timeout)
         acquired = result.get("result", {}).get("value")
-        if (
-            result.get("exceptionDetails")
-            or not isinstance(acquired, dict)
-            or acquired.get("failure")
-            or acquired.get("status") != 200
-        ):
+        if result.get("exceptionDetails"):
+            detail = result["exceptionDetails"]
+            text = detail.get("text") if isinstance(detail, dict) else str(detail)
+            logger.warning(f"Integrity issuance raised in the page: {text}")
+            raise SessionImportError("SDK_ISSUANCE")
+        if not isinstance(acquired, dict):
+            logger.warning(
+                "Integrity issuance returned no result"
+                f" (got {type(acquired).__name__})"
+            )
+            raise SessionImportError("SDK_ISSUANCE")
+        if acquired.get("failure"):
+            detail = acquired.get("detail")
+            logger.warning(
+                f"Integrity issuance failed in the page: {acquired['failure']}"
+                + (f" - {detail}" if detail else "")
+            )
+            raise SessionImportError("SDK_ISSUANCE")
+        if acquired.get("status") != 200:
+            logger.warning(
+                f"Integrity issuance returned HTTP {acquired.get('status')}"
+            )
             raise SessionImportError("SDK_ISSUANCE")
         data = acquired.get("data")
         observed = await exchange.proof
@@ -252,6 +315,10 @@ class SDKAcquisition:
             or data.get("expiration") != observed.get("expiration")
             or type(data.get("expiration")) not in (int, float)
         ):
+            logger.warning(
+                "Integrity issuance copies did not agree:"
+                f" page={type(data).__name__} network={type(observed).__name__}"
+            )
             raise SessionImportError("SDK_ISSUANCE")
         bundle = SessionBundle.from_dict({
             "version": 1, "captured_at": self.clock(), "expires_at": data["expiration"] / 1000,
@@ -300,7 +367,10 @@ async def _probe(bundle: SessionBundle) -> int:
         cookie_jar=aiohttp.DummyCookieJar(),
         headers={"Accept": "*/*", "Accept-Encoding": "gzip"},
     ) as http:
-        return await probe_bundle(bundle, http)
+        # The inventory query is what mining needs; a headless mint may not get
+        # the campaign catalogue, and that alone must not throw away a proof
+        # that can still keep the miner running.
+        return await probe_bundle(bundle, http, require_catalog=False)
 
 
 class SessionRenewal:
@@ -328,8 +398,10 @@ class SessionRenewal:
         on_renewed: Callable[[int], None] = lambda user_id: None,
         probe: Callable[[SessionBundle], Any] = _probe,
         clock: Callable[[], float] = time,
+        proxy: str = "",
     ):
         self.browser_path: str = browser_path
+        self.proxy: str = proxy
         self._file = PrivateSessionFile(session_file)
         self.on_renewed = on_renewed
         self.probe = probe
@@ -340,6 +412,8 @@ class SessionRenewal:
         self._force = False
         self.last_error: str | None = None
         self.last_renewed_at: float | None = None
+        # Consecutive failed attempts, for callers deciding how long to wait.
+        self.failures: int = 0
         self._unavailable: str | None = None
 
     # -- status ------------------------------------------------------------
@@ -467,7 +541,9 @@ class SessionRenewal:
             try:
                 await self._renew(seed)
                 retry = 5.0
+                self.failures = 0
             except SessionImportError as error:
+                self.failures += 1
                 self.last_error = error.code
                 if error.code in ("SDK_EXPIRED", "SDK_SEED"):
                     # Nothing left to renew from; wait for a new sign-in.
@@ -492,6 +568,7 @@ class SessionRenewal:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                self.failures += 1
                 self.last_error = "UNEXPECTED"
                 logger.exception("Session renewal failed unexpectedly")
                 await self._wait(retry)
@@ -504,7 +581,12 @@ class SessionRenewal:
         issuer = SDKIssuer(
             # Chromium refuses its sandbox when running as root, which is the
             # normal case in a container.
-            OwnedChromium(executable, no_sandbox=os.name == "posix" and os.geteuid() == 0),
+            OwnedChromium(
+                executable,
+                no_sandbox=os.name == "posix" and os.geteuid() == 0,
+                proxy=self.proxy,
+                user_agent=seed.bundle.user_agent,
+            ),
         )
         renewed = await issuer.issue(seed)
         # Prove the replacement works before adopting it - a proof that Twitch

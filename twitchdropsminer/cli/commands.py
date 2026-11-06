@@ -10,24 +10,30 @@ The dispatcher is shlex-based, so quoted arguments work as expected.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import secrets
 import shlex
+import shutil
+import subprocess
 import sys
 import time
 from collections import abc
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Awaitable, Callable
+from urllib.parse import quote
 
 from yarl import URL
 
-from constants import State, PriorityMode
-from exceptions import ExitRequest, ReloadRequest
-from login_server import start_reason
-from translate import _
+from twitchdropsminer.common.constants import State, PriorityMode, WORKING_DIR
+from twitchdropsminer.common.exceptions import ExitRequest, ReloadRequest
+from twitchdropsminer.auth.login_server import start_reason
+from twitchdropsminer.common.translate import _
 
 if TYPE_CHECKING:
-    from twitch import Twitch
-    from cli import CLIManager
+    from twitchdropsminer.core.twitch import Twitch
+    from twitchdropsminer.cli.cli import CLIManager
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -113,12 +119,22 @@ class CommandRegistry:
             Command("exit", _cmd_exit, ("quit", "q")),
             Command("status", _cmd_status),
             Command("log", _cmd_log, usage="log [N]"),
+            Command("copy", _cmd_copy, usage="copy [N]"),
             Command("clear", _cmd_clear),
             Command("version", _cmd_version),
             Command("about", _cmd_about),
 
             Command("whoami", _cmd_whoami),
-            Command("login", _cmd_login, usage="login [browser|status|cancel|renew]"),
+            Command(
+                "login",
+                _cmd_login,
+                usage="login [browser|status|cancel|renew|doctor]",
+            ),
+            Command(
+                "api",
+                _cmd_api,
+                usage="api [status|on|off|auth [on|off]|open|copy|file|token [<new>]|rotate]",
+            ),
 
             Command("pause", _cmd_pause),
             Command("resume", _cmd_resume),
@@ -248,12 +264,12 @@ async def _cmd_clear(ctx: CommandContext) -> None:
 
 
 async def _cmd_version(ctx: CommandContext) -> None:
-    from version import __version__
+    from twitchdropsminer.common.version import __version__
     ctx.cli.print_raw(_("cli", "commands", "version").format(version=__version__))
 
 
 async def _cmd_about(ctx: CommandContext) -> None:
-    from version import __version__
+    from twitchdropsminer.common.version import __version__
     cli = ctx.cli
     cli.print_raw(_("cli", "commands", "about_header").format(version=__version__))
     cli.print_raw(_("cli", "commands", "about_author").format(author="LCBRST"))
@@ -291,6 +307,8 @@ async def _cmd_login(ctx: CommandContext) -> None:
         _login_status_block(ctx)
     elif target == "cancel":
         _login_cancel(ctx)
+    elif target == "doctor":
+        await _login_doctor(ctx)
     elif target == "device":
         # Kept, but never reached on its own any more: the client this logs in
         # as cannot see the campaign list, so it is only worth having if the
@@ -342,6 +360,25 @@ def _login_device(ctx: CommandContext) -> None:
     # The waiting login loop picks this up within a couple of seconds; doing the
     # flow here would set a token without the verification that completes it.
     ctx.twitch.device_login_requested = True
+
+
+async def _login_doctor(ctx: CommandContext) -> None:
+    ctx.cli.print(_("cli", "commands", "login_doctor_running"))
+    result = await ctx.twitch.diagnose_browser()
+    browser = result.get("browser") or "?"
+    if result.get("ok"):
+        ctx.cli.print(
+            _("cli", "commands", "login_doctor_ok").format(browser=browser)
+        )
+        return
+    detail = result.get("detail") or ""
+    if detail:
+        detail = f" - {detail}"
+    ctx.cli.print(
+        _("cli", "commands", "login_doctor_failed").format(
+            browser=browser, code=result.get("code") or "?", detail=detail
+        )
+    )
 
 
 def _login_cancel(ctx: CommandContext) -> None:
@@ -462,6 +499,319 @@ def _renewal_reason(code: str | None) -> str:
         # know - a newer one could always turn up.
         return _("cli", "commands", "login_unavailable_unknown")
     return _("cli", "commands", key)
+
+
+def _copy_to_clipboard(text: str) -> str | None:
+    """Put text on the system clipboard; return the tool used, or None."""
+    if sys.platform == "win32":
+        candidates = [["clip"]]
+    elif sys.platform == "darwin":
+        candidates = [["pbcopy"]]
+    else:
+        candidates = [
+            ["wl-copy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ]
+    for command in candidates:
+        if shutil.which(command[0]) is None:
+            continue
+        try:
+            result = subprocess.run(
+                command,
+                input=text.encode("utf8"),
+                timeout=5,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            return command[0]
+    return None
+
+
+def _write_private(path, text: str) -> None:
+    """Write a file that only the current user can read from the start."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf8") as file:
+        file.write(text)
+
+
+async def _copy_to_user(ctx: CommandContext, text: str) -> str:
+    """
+    Copy text and say how it went: "tool", "terminal" or "none".
+
+    "terminal" is the OSC 52 sequence in CLIManager.set_clipboard, which is what
+    makes copy work over SSH when the remote box has no clipboard utility.
+    """
+    tool = await asyncio.to_thread(_copy_to_clipboard, text)
+    if tool is not None:
+        return "tool"
+    if ctx.cli.set_clipboard(text):
+        return "terminal"
+    return "none"
+
+
+def _token_url(ctx: CommandContext, status: dict) -> str | None:
+    """The dashboard address with the token in the fragment, or None."""
+    base = status.get("url")
+    token = _settings(ctx).api_token
+    if not base or not token:
+        return None
+    # A fragment never reaches the server or a Referer header; the page reads
+    # it, stores the token and clears the address bar.
+    return f"{base}#token={quote(token, safe='')}"
+
+
+async def _cmd_copy(ctx: CommandContext) -> None:
+    """Copy the last N lines of the console output to the clipboard."""
+    try:
+        count = int(ctx.args[0]) if ctx.args else 1
+    except ValueError:
+        ctx.cli.print(_("cli", "commands", "bad_number").format(value=ctx.args[0]))
+        return
+    count = max(1, min(count, 200))
+    lines = ctx.cli.output_buffer[-count:]
+    if not lines:
+        ctx.cli.print(_("cli", "commands", "copy_empty"))
+        return
+    text = "\n".join(lines)
+    how = await _copy_to_user(ctx, text)
+    if how == "tool":
+        ctx.cli.print(_("cli", "commands", "copied").format(count=len(lines)))
+        return
+    # OSC 52 can be silently blocked by the terminal, and there may be no
+    # clipboard at all on a headless box. Leave a file behind in both cases so
+    # there is always something to scp or read.
+    path = WORKING_DIR / "copy.txt"
+    try:
+        _write_private(path, text + "\n")
+    except OSError:
+        if how == "terminal":
+            ctx.cli.print(_("cli", "commands", "copy_terminal"))
+        else:
+            ctx.cli.print(_("cli", "commands", "copy_failed"))
+        return
+    if how == "terminal":
+        ctx.cli.print(
+            _("cli", "commands", "copy_terminal_saved").format(
+                count=len(lines), path=path
+            )
+        )
+    else:
+        ctx.cli.print(
+            _("cli", "commands", "copy_file_written").format(
+                count=len(lines), path=path
+            )
+        )
+
+
+async def _cmd_api(ctx: CommandContext) -> None:
+    """Manage the management API and the web dashboard it serves."""
+    s = _settings(ctx)
+    sub = (ctx.args[0].lower() if ctx.args else "status")
+    if sub in ("status", "show"):
+        status = ctx.twitch.api_status()
+        if status["listening"]:
+            ctx.cli.print_raw(
+                _("cli", "commands", "api_status").format(
+                    url=status["url"], bind=status["bind"]
+                )
+            )
+            elsewhere = [
+                url for url in status.get("urls", []) if url != status["url"]
+            ]
+            if elsewhere:
+                ctx.cli.print_raw(
+                    _("cli", "commands", "api_lan").format(urls=", ".join(elsewhere))
+                )
+        elif status["enabled"]:
+            ctx.cli.print(
+                _("cli", "commands", "api_failed").format(reason=status["error"] or "?")
+            )
+        else:
+            ctx.cli.print_raw(_("cli", "commands", "api_disabled"))
+        token_state = (
+            _("cli", "commands", "api_token_set") if s.api_token
+            else _("cli", "commands", "api_token_unset")
+        )
+        ctx.cli.print_raw(
+            _("cli", "commands", "api_token_state").format(state=token_state)
+        )
+        ctx.cli.print_raw(
+            _("cli", "commands", "api_auth_state").format(
+                state=(
+                    _("cli", "commands", "api_auth_enabled")
+                    if s.api_auth_enabled
+                    else _("cli", "commands", "api_auth_disabled")
+                )
+            )
+        )
+        if not s.api_auth_enabled:
+            ctx.cli.print(_("cli", "commands", "api_auth_off_warning"))
+        if status["listening"]:
+            ctx.cli.print_raw(_("cli", "commands", "api_hint"))
+        return
+    if sub == "on":
+        s.api_enabled = True
+        if not s.api_token:
+            s.api_token = secrets.token_urlsafe(32)
+        s.save()
+        await ctx.twitch.apply_api_settings()
+        status = ctx.twitch.api_status()
+        if status["listening"]:
+            ctx.cli.print_raw(
+                _("cli", "commands", "api_enabled").format(url=status["url"])
+            )
+            elsewhere = [
+                url for url in status.get("urls", []) if url != status["url"]
+            ]
+            if elsewhere:
+                ctx.cli.print_raw(
+                    _("cli", "commands", "api_lan").format(urls=", ".join(elsewhere))
+                )
+            if not s.api_auth_enabled:
+                ctx.cli.print(_("cli", "commands", "api_auth_off_warning"))
+            ctx.cli.print_raw(_("cli", "commands", "api_hint"))
+        else:
+            ctx.cli.print(
+                _("cli", "commands", "api_failed").format(reason=status["error"] or "?")
+            )
+        return
+    if sub == "off":
+        s.api_enabled = False
+        s.save()
+        await ctx.twitch.apply_api_settings()
+        ctx.cli.print(_("cli", "commands", "api_disabled_msg"))
+        return
+    if sub in ("open", "browser"):
+        if not s.api_enabled:
+            s.api_enabled = True
+            if not s.api_token:
+                s.api_token = secrets.token_urlsafe(32)
+            s.save()
+            await ctx.twitch.apply_api_settings()
+        status = ctx.twitch.api_status()
+        if not status["listening"]:
+            ctx.cli.print(
+                _("cli", "commands", "api_failed").format(reason=status["error"] or "?")
+            )
+            return
+        if s.api_auth_enabled:
+            url = _token_url(ctx, status)
+            if url is None:
+                ctx.cli.print(_("cli", "commands", "api_no_token"))
+                return
+        else:
+            # No token is asked for, so the plain dashboard address is enough.
+            url = status["url"]
+        import webbrowser
+
+        try:
+            opened = webbrowser.open_new_tab(url)
+        except Exception:
+            opened = False
+        if opened:
+            ctx.cli.print(_("cli", "commands", "api_opened"))
+            elsewhere = [item for item in status.get("urls", []) if item != status["url"]]
+            if elsewhere:
+                ctx.cli.print_raw(
+                    _("cli", "commands", "api_lan").format(urls=", ".join(elsewhere))
+                )
+        else:
+            # The address carries the token in its fragment, so the page can
+            # sign in without the user typing anything. Offer every address -
+            # on a LAN the machine's own 127.0.0.1 is not reachable from a phone.
+            token = _settings(ctx).api_token
+            links = [
+                f"{base}#token={quote(token, safe='')}"
+                for base in (status.get("urls") or [status["url"]])
+            ]
+            ctx.cli.print_raw(
+                _("cli", "commands", "api_open_failed").format(
+                    url="\n  ".join(links)
+                )
+            )
+        return
+    if sub == "copy":
+        if not s.api_token:
+            s.api_token = secrets.token_urlsafe(32)
+            s.save()
+        how = await _copy_to_user(ctx, s.api_token)
+        if how == "tool":
+            ctx.cli.print(_("cli", "commands", "api_copied"))
+        elif how == "terminal":
+            ctx.cli.print(_("cli", "commands", "api_copied_terminal"))
+        else:
+            ctx.cli.print(_("cli", "commands", "api_copy_failed"))
+        return
+    if sub in ("file", "export"):
+        if not s.api_token:
+            s.api_token = secrets.token_urlsafe(32)
+            s.save()
+        path = WORKING_DIR / "api-token.txt"
+        try:
+            _write_private(path, s.api_token + "\n")
+        except OSError as exc:
+            ctx.cli.print(_("cli", "commands", "api_file_failed").format(exc=exc))
+        else:
+            ctx.cli.print(_("cli", "commands", "api_file_written").format(path=path))
+        return
+    if sub == "auth":
+        value = ctx.args[1].lower() if len(ctx.args) > 1 else ""
+        if not value:
+            ctx.cli.print_raw(
+                _("cli", "commands", "api_auth_state").format(
+                    state=(
+                        _("cli", "commands", "api_auth_enabled")
+                        if s.api_auth_enabled
+                        else _("cli", "commands", "api_auth_disabled")
+                    )
+                )
+            )
+            return
+        if value in ("on", "true", "1", "yes"):
+            s.api_auth_enabled = True
+            s.save()
+            ctx.cli.print(_("cli", "commands", "api_auth_on"))
+        elif value in ("off", "false", "0", "no"):
+            s.api_auth_enabled = False
+            s.save()
+            ctx.cli.print(_("cli", "commands", "api_auth_off"))
+            ctx.cli.print(_("cli", "commands", "api_auth_off_warning"))
+        else:
+            ctx.cli.print(_("cli", "commands", "api_auth_usage"))
+        return
+    if sub in ("token", "set-token"):
+        if len(ctx.args) > 1:
+            new_token = " ".join(ctx.args[1:]).strip()
+            if not new_token:
+                ctx.cli.print(_("cli", "commands", "api_no_token"))
+                return
+            if any(char.isspace() for char in new_token):
+                ctx.cli.print(_("cli", "commands", "api_token_has_space"))
+                return
+            if len(new_token) < 8:
+                ctx.cli.print(_("cli", "commands", "api_token_too_short"))
+                return
+            s.api_token = new_token
+            s.save()
+            ctx.cli.print(_("cli", "commands", "api_token_custom_set"))
+            return
+        if not s.api_token:
+            ctx.cli.print(_("cli", "commands", "api_no_token"))
+        else:
+            ctx.cli.print_raw(s.api_token)
+        return
+    if sub == "rotate":
+        s.api_token = secrets.token_urlsafe(32)
+        s.save()
+        ctx.cli.print_raw(_("cli", "commands", "api_token_rotated"))
+        ctx.cli.print_raw(s.api_token)
+        return
+    ctx.cli.print_raw(_("cli", "commands", "api_usage"))
 
 
 async def _cmd_pause(ctx: CommandContext) -> None:
@@ -841,9 +1191,10 @@ async def _cmd_reload_interval(ctx: CommandContext) -> None:
 
 _GETTABLE_KEYS = (
     "priority", "exclude", "priority_mode", "language", "proxy",
-    "connection_quality", "reload_interval", "tray_notifications",
-    "enable_badges_emotes", "available_drops_check", "dark_mode", "autostart_tray",
+    "connection_quality", "reload_interval",
+    "enable_badges_emotes", "available_drops_check",
     "login_server_enabled", "login_server_host", "login_server_port",
+    "api_enabled", "api_host", "api_port", "api_token", "api_auth_enabled",
     "renewal_browser_path", "welcome_shown",
 )
 

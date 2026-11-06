@@ -18,6 +18,8 @@ log.txt
 /dump.dat
 /lock.file
 settings.json
+/api-token.txt
+/copy.txt
 /lang/English.json
 .cli_history
 # AppImage

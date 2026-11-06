@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections import abc
 from typing import Any, TypedDict, TYPE_CHECKING
 
-from exceptions import MinerException
-from utils import json_load, json_save
-from constants import IS_PACKAGED, LANG_PATH, DEFAULT_LANG
+from twitchdropsminer.common.exceptions import MinerException
+from twitchdropsminer.common.utils import json_load, json_save
+from twitchdropsminer.common.constants import IS_PACKAGED, LANG_PATH, DEFAULT_LANG
 
 if TYPE_CHECKING:
     from typing_extensions import NotRequired
@@ -293,10 +293,12 @@ default_cli_translation: CLIMessages = {
             "exit": "Quit the application",
             "status": "Show current state, watch target, websockets",
             "log": "Print the last N output lines (default 20)",
+            "copy": "Copy the last N log lines (to a file when there is no clipboard)",
             "clear": "Clear the screen",
             "version": "Show the running version",
             "about": "Show project information and links",
             "login": "Sign in through a browser, or check how the session is holding up",
+            "api": "Manage the web dashboard and its HTTP API",
             "whoami": "Show the logged-in Twitch user id",
             "pause": "Pause mining (drop into IDLE)",
             "resume": "Resume mining (re-fetch inventory)",
@@ -334,6 +336,12 @@ default_cli_translation: CLIMessages = {
         "ws_entry": "  ws#{idx}: {status} ({topics} topics)",
         "ws_none": "  ws: —",
         "bad_number": "bad number: {value}",
+        "copy_empty": "nothing to copy yet",
+        "copy_failed": "No clipboard tool found on this machine and the file could not be written.",
+        "copied": "Copied {count} line(s) to the clipboard.",
+        "copy_terminal": "Copied {count} line(s) to the terminal clipboard (OSC 52).",
+        "copy_terminal_saved": "Copied {count} line(s) via the terminal; also saved to {path}.",
+        "copy_file_written": "No clipboard available; wrote {count} line(s) to {path}.",
         "version": "TwitchDropsMiner {version} (CLI)",
         "about_header": "TwitchDropsMiner-CLI {version}",
         "about_author": "Author: {author}",
@@ -459,7 +467,10 @@ default_cli_translation: CLIMessages = {
             "This login cannot see the campaign list. Run `login browser` and sign\n"
             "in once - the full list comes back as soon as the session is in."
         ),
-        "login_usage": "usage: login [browser|status|cancel|renew|device]",
+        "login_usage": "usage: login [browser|status|cancel|renew|device|doctor]",
+        "login_doctor_running": "Starting a throwaway headless browser to check the browser path...",
+        "login_doctor_ok": "Browser check passed: {browser}",
+        "login_doctor_failed": "Browser check failed: {browser} ({code}){detail}",
         "login_device_already": "already logged in",
         "login_device_warning": (
             "Logging in the old way: this client cannot see the campaign list, so\n"
@@ -498,6 +509,52 @@ default_cli_translation: CLIMessages = {
         "login_renewal_off": "unavailable - {reason}",
         "login_renewed": "last renewed: {when}",
         "login_renewal_error": "last renewal failed: {code}",
+        "api_usage": "usage: api [status|on|off|auth [on|off]|open|copy|file|token [<new>]|rotate]",
+        "api_auth_usage": "usage: api auth [on|off]",
+        "api_auth_state": "API authentication: {state}",
+        "api_auth_enabled": "token required",
+        "api_auth_disabled": "OFF - no token required",
+        "api_auth_on": "API token authentication enabled.",
+        "api_auth_off": "API token authentication disabled.",
+        "api_auth_off_warning": (
+            "WARNING: the management API no longer asks for a token. Anyone who"
+            " can reach its port can control the miner."
+        ),
+        "api_status": "API: listening at {url} (bind {bind})",
+        "api_disabled": "API: disabled",
+        "api_failed": "API: could not start ({reason})",
+        "api_enabled": "API enabled at {url}",
+        "api_disabled_msg": "API disabled",
+        "api_hint": "Run 'api open' to open the dashboard already signed in, or 'api copy' to copy the token.",
+        "api_opened": "Opened the dashboard in your browser.",
+        "api_open_failed": "Could not open a browser. Open this address in one: {url}",
+        "api_copied": "API token copied to the clipboard.",
+        "api_copied_terminal": (
+            "Sent the token to the terminal clipboard (OSC 52). If pasting shows"
+            " nothing, run 'api file'."
+        ),
+        "api_copy_failed": (
+            "No clipboard tool or terminal clipboard available. Run 'api file'"
+            " to write the token to a file."
+        ),
+        "api_file_written": (
+            "API token written to {path} (only your user can read it)."
+            " Fetch it with scp/SFTP, then delete it."
+        ),
+        "api_file_failed": "Could not write the token file: {exc}",
+        "api_token_custom_set": (
+            "API token updated. Dashboards that are already open must reconnect"
+            " with the new token."
+        ),
+        "api_token_too_short": "The token must be at least 8 characters long.",
+        "api_token_has_space": "The token cannot contain spaces.",
+        "api_token_state": "API token: {state}",
+        "api_token_set": "set (run 'api token' to show it)",
+        "api_token_unset": "not generated yet",
+        "api_no_token": "The API token is empty. Run 'api on' or 'api rotate'.",
+        "api_token_rotated": "API token rotated - open dashboards must reconnect with the new one:",
+        "api_listening": "Management API listening at {url}",
+        "api_lan": "Also reachable on the LAN: {urls}",
     },
     # The browser sign-in: what the page says, and how an attempt that ended
     # badly is reported. Distinct from "login", which is the device code flow.

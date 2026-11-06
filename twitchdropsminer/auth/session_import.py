@@ -24,11 +24,14 @@ from pathlib import Path
 from time import time
 from types import MappingProxyType
 from typing import Any, ClassVar, Mapping
+import logging
 
 import aiohttp
 
-from constants import IMPORTED_SESSION_PATH, GQL_QUERIES, ClientType
-from exceptions import MinerException
+from twitchdropsminer.common.constants import IMPORTED_SESSION_PATH, GQL_QUERIES, ClientType
+from twitchdropsminer.common.exceptions import MinerException
+
+logger = logging.getLogger("TwitchDrops")
 
 
 class SessionImportError(MinerException):
@@ -281,13 +284,23 @@ class ServerSeed:
         }
 
 
-async def probe_bundle(bundle: SessionBundle, session: aiohttp.ClientSession) -> int:
+async def probe_bundle(
+    bundle: SessionBundle,
+    session: aiohttp.ClientSession,
+    *,
+    require_catalog: bool = True,
+) -> int:
     """
     Prove that a captured context still works, and return its user ID.
 
     Both checks run against the originating Twitch endpoints with exactly the
     captured headers: an integrity proof only holds for the context it was
     issued in, so nothing here may substitute its own values.
+
+    ``require_catalog=False`` accepts a context that can read the in-progress
+    inventory but not the campaign catalogue. A renewal runs in a throwaway
+    headless browser, and Twitch sometimes withholds the catalogue from that
+    context; the session is still valid for mining what is already in progress.
     """
     try:
         async with session.get(
@@ -317,18 +330,44 @@ async def probe_bundle(bundle: SessionBundle, session: aiohttp.ClientSession) ->
             json=[GQL_QUERIES["Inventory"], GQL_QUERIES["Campaigns"]],
         ) as response:
             if response.status != 200:
+                logger.warning(
+                    f"Session probe: the catalog request returned HTTP {response.status}"
+                )
                 raise SessionImportError("REQUEST")
             results = await response.json()
-        # The whole point of the import is the campaign catalog, so refuse a
-        # context that cannot read it. An empty list is a valid answer.
         if not isinstance(results, list) or len(results) != 2:
+            logger.warning("Session probe: the GQL batch response had an unexpected shape")
             raise SessionImportError("CATALOG")
-        for row in results:
-            if not isinstance(row, dict) or row.get("errors"):
+        for index, row in enumerate(results):
+            if not isinstance(row, dict):
+                logger.warning("Session probe: a GQL response was not an object")
                 raise SessionImportError("CATALOG")
+            if row.get("errors"):
+                messages = [
+                    str(error.get("message", error)) if isinstance(error, dict) else str(error)
+                    for error in row["errors"]
+                ]
+                logger.warning(
+                    f"Session probe: GQL query #{index + 1} failed:"
+                    f" {'; '.join(messages) or 'unknown error'}"
+                )
+                # A failure on the inventory query means the context cannot mine
+                # at all. A failure on the catalog query alone is handled below.
+                if index == 0 or require_catalog:
+                    raise SessionImportError("CATALOG")
         catalog = ((results[1].get("data") or {}).get("currentUser") or {}).get("dropCampaigns")
         if not isinstance(catalog, list):
-            raise SessionImportError("CATALOG")
+            if require_catalog:
+                logger.warning(
+                    "Session probe: dropCampaigns is not a list"
+                    f" (got {type(catalog).__name__}); this context cannot see the catalog"
+                )
+                raise SessionImportError("CATALOG")
+            logger.warning(
+                "The renewed session cannot see the campaign catalog; mining will"
+                " continue with campaigns already in progress. Sign in with a"
+                " browser to restore campaign discovery."
+            )
     except aiohttp.ClientError:
         raise SessionImportError("REQUEST") from None
     except (ValueError, TypeError, KeyError, AttributeError):

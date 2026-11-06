@@ -3,7 +3,7 @@
 #
 # Fetch this file and run it - there is no repository to clone first:
 #
-#     wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/install_linux.sh
+#     wget -O install_linux.sh https://raw.githubusercontent.com/LCBRST/TwitchDropsMiner-CLI/main/tools/install_linux.sh
 #     chmod +x install_linux.sh
 #     ./install_linux.sh
 #
@@ -311,7 +311,7 @@ if [[ "$dry_run" -eq 0 ]]; then
         # Archives hold their contents under one top-level directory, whose name
         # varies by how it was made. Moving it up rather than asking tar to strip
         # it keeps this working with the smaller tar implementations too.
-        if [[ ! -f "$WORK_DIR/src/build_cli.sh" ]]; then
+        if [[ ! -f "$WORK_DIR/src/tools/build_cli.sh" ]]; then
             inner="$(find "$WORK_DIR/src" -mindepth 1 -maxdepth 1 -type d | head -1)"
             [[ -n "$inner" ]] || die "the archive did not contain a directory"
             mv "$inner"/* "$inner"/.[!.]* "$WORK_DIR/src/" 2>/dev/null || true
@@ -327,11 +327,11 @@ if [[ "$dry_run" -eq 0 ]]; then
 fi
 
 src_dir="$WORK_DIR/src"
-[[ -f "$src_dir/build_cli.sh" ]] || die "the downloaded source has no build_cli.sh"
+[[ -f "$src_dir/tools/build_cli.sh" ]] || die "the downloaded source has no tools/build_cli.sh"
 
 step "Building"
 info "this takes a minute or two"
-run chmod +x "$src_dir/build_cli.sh"
+run chmod +x "$src_dir/tools/build_cli.sh"
 if [[ "$dry_run" -eq 0 ]]; then
     # build_cli.sh wants a venv already there; it installs the rest itself.
     info "creating a virtual environment"
@@ -344,7 +344,7 @@ if [[ "$dry_run" -eq 0 ]]; then
         "$PYTHON" -m venv "$src_dir/venv" ||
             die "could not create a virtual environment"
     fi
-    APP_NAME="$APP_NAME" "$src_dir/build_cli.sh"
+    APP_NAME="$APP_NAME" "$src_dir/tools/build_cli.sh"
 fi
 
 built="$src_dir/dist/$APP_NAME"

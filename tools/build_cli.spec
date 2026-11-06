@@ -1,8 +1,8 @@
 # PyInstaller spec for the CLI build.
 #
 # Build with:
-#   pyinstaller build_cli.spec
-# or use the wrapper script: ./build_cli.sh
+#   pyinstaller tools/build_cli.spec
+# or use the wrapper script: ./tools/build_cli.sh
 #
 # This produces a single-file binary in `dist/`. The original tkinter GUI is
 # excluded entirely — set EXCLUDE_GUI=0 in the environment if you want to
@@ -15,12 +15,15 @@ import os
 import sys
 from pathlib import Path
 
-SELF_PATH = str(Path(".").resolve())
+# This spec lives in tools/; the project root is its parent.
+SPEC_DIR = Path(SPECPATH).resolve()
+ROOT = SPEC_DIR.parent
+SELF_PATH = str(ROOT)
 if SELF_PATH not in sys.path:
     sys.path.insert(0, SELF_PATH)
 
-# Import after sys.path is set so we can read constants from the project.
-from constants import WORKING_DIR, DEFAULT_LANG  # noqa: E402
+# Import after sys.path is set so we can read the default language.
+from twitchdropsminer.common.constants import DEFAULT_LANG  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -37,9 +40,15 @@ OPTIMIZE_LEVEL = int(os.environ.get("OPTIMIZE", "0") or "0")  # 0/1/2
 # ---------------------------------------------------------------------------
 
 datas: list[tuple[str, str]] = []
-for lang_filepath in WORKING_DIR.joinpath("lang").glob("*.json"):
+for lang_filepath in ROOT.joinpath("lang").glob("*.json"):
     if lang_filepath.stem != DEFAULT_LANG:
         datas.append((str(lang_filepath), "lang"))
+# The management dashboard is served from webui/ by the API module. Its source
+# lives in the TwitchDropMiner_WebAddon repository; tools/sync-webui.sh
+# vendors it here before a build.
+webui_path = ROOT.joinpath("webui")
+if webui_path.is_dir():
+    datas.append((str(webui_path), "webui"))
 
 # ---------------------------------------------------------------------------
 # Module exclusions: chop out anything the CLI never touches.
@@ -66,7 +75,7 @@ if EXCLUDE_GUI:
 # ---------------------------------------------------------------------------
 
 hiddenimports: list[str] = [
-    # prompt_toolkit — imported inside try/except ImportError in cli.py,
+    # prompt_toolkit — imported inside try/except ImportError in the CLI,
     # so PyInstaller's static analysis won't discover them. Without these
     # the binary silently degrades to the readline fallback.
     "prompt_toolkit",
@@ -97,7 +106,7 @@ hiddenimports: list[str] = [
 # ---------------------------------------------------------------------------
 
 a = Analysis(
-    ["main.py"],
+    [str(ROOT / "main.py")],
     pathex=[SELF_PATH],
     binaries=[],
     datas=datas,

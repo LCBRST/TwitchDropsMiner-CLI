@@ -23,9 +23,9 @@ from typing import Any, Literal, Callable, Generic, Mapping, TypeVar, ParamSpec,
 
 from yarl import URL
 
-from exceptions import ExitRequest, ReloadRequest
-from constants import IS_PACKAGED, JsonType, PriorityMode
-from constants import _resource_path as resource_path  # noqa
+from twitchdropsminer.common.exceptions import ExitRequest, ReloadRequest
+from twitchdropsminer.common.constants import IS_PACKAGED, JsonType, PriorityMode
+from twitchdropsminer.common.constants import _resource_path as resource_path  # noqa
 
 # Tk and PIL.ImageTk are only required by the GUI build. Keep utils importable
 # from a headless interpreter by guarding the imports.
@@ -155,7 +155,7 @@ def task_wrapper(
                     # critical task's death should trigger a termination.
                     # there isn't an easy and sure way to obtain the Twitch instance here,
                     # but we can improvise finding it
-                    from twitch import Twitch  # cyclic import
+                    from twitchdropsminer.core.twitch import Twitch  # cyclic import
                     probe = args and args[0] or None  # extract from 'self' arg
                     if isinstance(probe, Twitch):
                         probe.close()

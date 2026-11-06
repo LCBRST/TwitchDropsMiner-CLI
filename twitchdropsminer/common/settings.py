@@ -5,22 +5,22 @@ from typing import Any, TypedDict, TYPE_CHECKING
 
 from yarl import URL
 
-from utils import json_load, json_save
-from constants import SETTINGS_PATH, DEFAULT_LANG, PriorityMode
+from twitchdropsminer.common.utils import json_load, json_save
+from twitchdropsminer.common.constants import SETTINGS_PATH, DEFAULT_LANG, PriorityMode
 
 if TYPE_CHECKING:
     from main import ParsedArgs
 
 
 class SettingsFile(TypedDict):
+    # GUI-only settings from upstream (dark_mode, autostart_tray,
+    # tray_notifications) are not part of the CLI: there is no tray and no
+    # upstream theme. They are dropped from old settings files on load.
     proxy: URL
     language: str
-    dark_mode: bool
     exclude: set[str]
     priority: list[str]
-    autostart_tray: bool
     connection_quality: int
-    tray_notifications: bool
     enable_badges_emotes: bool
     available_drops_check: bool
     priority_mode: PriorityMode
@@ -28,6 +28,11 @@ class SettingsFile(TypedDict):
     login_server_enabled: bool
     login_server_host: str
     login_server_port: int
+    api_enabled: bool
+    api_host: str
+    api_port: int
+    api_token: str
+    api_auth_enabled: bool
     renewal_browser_path: str
     welcome_shown: bool
 
@@ -36,11 +41,8 @@ default_settings: SettingsFile = {
     "proxy": URL(),
     "priority": [],
     "exclude": set(),
-    "dark_mode": False,
-    "autostart_tray": False,
     "connection_quality": 1,
     "language": DEFAULT_LANG,
-    "tray_notifications": True,
     "enable_badges_emotes": False,
     "available_drops_check": False,
     "priority_mode": PriorityMode.PRIORITY_ONLY,
@@ -50,6 +52,19 @@ default_settings: SettingsFile = {
     "login_server_enabled": False,
     "login_server_host": "0.0.0.0",
     "login_server_port": 8090,
+    # Management API and web dashboard. Binds every interface by default so a
+    # phone or another computer on the LAN can open the dashboard; every /api
+    # request still needs the token, which is generated when the API is first
+    # enabled (`api token` shows it). Set api_host to 127.0.0.1 to restrict it
+    # to this machine.
+    "api_enabled": False,
+    "api_host": "0.0.0.0",
+    "api_port": 8091,
+    "api_token": "",
+    # Authentication for /api/*; the dashboard itself is told whether it is
+    # needed through the public /auth endpoint. Turning this off leaves the
+    # miner controllable by anything that can reach the port.
+    "api_auth_enabled": True,
     # Empty means "find one": Chromium or Chrome on PATH, then the usual install
     # locations. Set it when renewal picks the wrong browser.
     "renewal_browser_path": "",
@@ -70,12 +85,9 @@ class Settings:
     # from settings file
     proxy: URL
     language: str
-    dark_mode: bool
     exclude: set[str]
     priority: list[str]
-    autostart_tray: bool
     connection_quality: int
-    tray_notifications: bool
     enable_badges_emotes: bool
     available_drops_check: bool
     priority_mode: PriorityMode
@@ -83,6 +95,11 @@ class Settings:
     login_server_enabled: bool
     login_server_host: str
     login_server_port: int
+    api_enabled: bool
+    api_host: str
+    api_port: int
+    api_token: str
+    api_auth_enabled: bool
     renewal_browser_path: str
     welcome_shown: bool
 
