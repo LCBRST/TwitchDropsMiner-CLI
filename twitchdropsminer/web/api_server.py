@@ -195,6 +195,7 @@ def _status_data(twitch: Twitch) -> dict[str, Any]:
     login = twitch.gui.login
     return {
         "version": __version__,
+        "language": twitch.settings.language,
         "state": twitch._state.name,
         "watching": _channel_brief(watching),
         "progress": _progress_data(twitch.gui.progress.current),
@@ -785,6 +786,8 @@ class APIEndpoint:
             twitch.stop_watching()
             return web.json_response({"ok": True})
         if action == "exit":
+            # API clients only: stopping the miner also stops this dashboard,
+            # so the web UI deliberately has no button for it.
             twitch.close()
             return web.json_response({"ok": True, "exiting": True})
         if action == "login-browser":

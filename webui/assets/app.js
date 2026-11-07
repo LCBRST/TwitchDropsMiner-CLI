@@ -9,6 +9,7 @@
 const TOKEN_KEY = 'tdm-api-token';
 const TOKEN_SESSION_KEY = 'tdm-api-token-session';
 const LANG_KEY = 'tdm-ui-lang';
+const LANG_BASE_KEY = 'tdm-ui-lang-miner';
 const THEME_KEY = 'tdm-ui-theme';
 
 const I18N = {
@@ -95,8 +96,6 @@ const I18N = {
     refresh_inventory: 'Refresh inventory',
     unwatch: 'Stop watching',
     claim: 'Claim ready drops',
-    exit: 'Exit miner',
-    exit_confirm: 'Stop the miner? Mining ends until you start it again.',
     no_websockets: 'No websocket connections yet.',
     search_channels: 'Search channels',
     search_campaigns: 'Search campaigns',
@@ -145,6 +144,7 @@ const I18N = {
     saved: 'Saved.',
     save_failed: 'Could not save: {error}',
     api_info: 'API',
+    version: 'Version',
     api_enabled: 'Enabled',
     api_listening: 'Listening',
     api_bind: 'Bind address',
@@ -169,7 +169,6 @@ const I18N = {
     refreshed: 'Inventory refresh requested.',
     unwatched: 'Stopped watching.',
     claimed_result: 'Claimed {claimed} drop(s), {failed} failed.',
-    exiting: 'The miner is exiting.',
     action_failed: 'Action failed: {error}',
     footer: 'TwitchDropsMiner web add-on',
     tab_refreshed: 'Refreshed.',
@@ -257,8 +256,6 @@ const I18N = {
     refresh_inventory: '刷新库存',
     unwatch: '停止观看',
     claim: '领取可领取掉宝',
-    exit: '退出矿工',
-    exit_confirm: '要停止矿工吗？停止后需要重新启动才会继续挖宝。',
     no_websockets: '还没有 websocket 连接。',
     search_channels: '搜索频道',
     search_campaigns: '搜索活动',
@@ -307,6 +304,7 @@ const I18N = {
     saved: '已保存。',
     save_failed: '保存失败：{error}',
     api_info: '接口',
+    version: '版本',
     api_enabled: '已启用',
     api_listening: '监听中',
     api_bind: '绑定地址',
@@ -331,7 +329,6 @@ const I18N = {
     refreshed: '已请求刷新库存。',
     unwatched: '已停止观看。',
     claimed_result: '领取成功 {claimed} 个，失败 {failed} 个。',
-    exiting: '矿工正在退出。',
     action_failed: '操作失败：{error}',
     footer: 'TwitchDropsMiner 网页插件',
     tab_refreshed: '已刷新。',
@@ -417,8 +414,6 @@ I18N['zh-TW'] = {
   refresh_inventory: '重新整理庫存',
   unwatch: '停止觀看',
   claim: '領取可領取掉寶',
-  exit: '結束礦工',
-  exit_confirm: '要停止礦工嗎？停止後需要重新啟動才會繼續挖寶。',
   no_websockets: '還沒有 websocket 連線。',
   search_channels: '搜尋頻道',
   search_campaigns: '搜尋活動',
@@ -467,6 +462,7 @@ I18N['zh-TW'] = {
   saved: '已儲存。',
   save_failed: '儲存失敗：{error}',
   api_info: '介面',
+  version: '版本',
   api_enabled: '已啟用',
   api_listening: '監聽中',
   api_bind: '綁定位址',
@@ -491,7 +487,6 @@ I18N['zh-TW'] = {
   refreshed: '已要求重新整理庫存。',
   unwatched: '已停止觀看。',
   claimed_result: '領取成功 {claimed} 個，失敗 {failed} 個。',
-  exiting: '礦工正在結束。',
   action_failed: '操作失敗：{error}',
   footer: 'TwitchDropsMiner 網頁外掛',
   tab_refreshed: '已重新整理。',
@@ -658,6 +653,7 @@ async function loadStatus() {
   state.status = await apiGet('/api/status');
   renderHeader();
   renderOverview();
+  syncLanguageWithMiner();
 }
 
 async function loadChannels() {
@@ -679,6 +675,7 @@ async function loadSettings() {
   state.api = data.api || {};
   renderSettings();
   renderApiInfo();
+  syncLanguageWithMiner();
 }
 
 async function loadLogin() {
@@ -701,6 +698,7 @@ async function connect(token) {
   state.token = token;
   const data = await apiGet('/api/status');
   state.status = data;
+  syncLanguageWithMiner();
   $('#gate').hidden = true;
   $('#app').hidden = false;
   await Promise.all([loadChannels(), loadCampaigns(), loadSettings(), loadLogin(), loadLogs()]);
@@ -797,6 +795,7 @@ function startEvents() {
             state.status = data;
             renderHeader();
             renderOverview();
+            syncLanguageWithMiner();
           } else if (event === 'logs') {
             state.logs = data.lines || [];
             renderLogs();
@@ -1441,6 +1440,7 @@ function renderSettings() {
 
   $('#settings-save').onclick = async () => {
     const status = $('#settings-status');
+    const previousLanguage = state.settings?.language;
     status.textContent = '…';
     const patch = {
       priority: splitLines(priority.value),
@@ -1460,9 +1460,16 @@ function renderSettings() {
     try {
       const data = await apiPost('/api/settings', patch);
       state.settings = data.settings || state.settings;
-      status.textContent = t('saved');
+      if ((state.settings?.language || patch.language) !== previousLanguage) {
+        // Picking the miner language here also re-languages the dashboard:
+        // drop any UI-only override so later CLI changes keep propagating.
+        localStorage.removeItem(LANG_KEY);
+        localStorage.removeItem(LANG_BASE_KEY);
+      }
+      await loadStatus().catch(() => {});
+      const saved = $('#settings-status');
+      if (saved) saved.textContent = t('saved');
       toast(t('saved'));
-      await loadStatus();
     } catch (error) {
       status.textContent = '';
       toast(t('save_failed', { error: error.message }), true);
@@ -1475,6 +1482,7 @@ function renderApiInfo() {
   const api = state.api || {};
   const token = state.settings?.api_token;
   const rows = [
+    [t('version'), state.status?.version || '—'],
     [t('api_enabled'), api.enabled ? t('yes') : t('no')],
     [t('api_listening'), api.listening ? t('yes') : t('no')],
     [t('api_bind'), api.bind || '—'],
@@ -1519,7 +1527,6 @@ async function claimDrop(drop) {
 }
 
 async function runAction(action) {
-  if (action === 'exit' && !window.confirm(t('exit_confirm'))) return;
   try {
     const data = await apiPost(`/api/actions/${action}`);
     if (action === 'pause') toast(t('paused'));
@@ -1527,11 +1534,6 @@ async function runAction(action) {
     else if (action === 'refresh') toast(t('refreshed'));
     else if (action === 'unwatch') toast(t('unwatched'));
     else if (action === 'claim') toast(t('claimed_result', { claimed: data.claimed ?? 0, failed: data.failed ?? 0 }));
-    else if (action === 'exit') {
-      toast(t('exiting'));
-      stopEvents();
-      return;
-    }
     await Promise.all([loadStatus(), loadChannels(), loadCampaigns()]);
   } catch (error) {
     toast(t('action_failed', { error: error.message }), true);
@@ -1549,6 +1551,46 @@ function detectLanguage() {
   if (tag.startsWith('zh-tw') || tag.startsWith('zh-hant')) return 'zh-TW';
   if (tag.startsWith('zh')) return 'zh-CN';
   return 'en';
+}
+
+// Map the miner's `language` setting onto one of the dashboard's locales.
+function uiLanguageFor(code) {
+  if (!code) return null;
+  const value = String(code).replace('_', '-');
+  const lower = value.toLowerCase();
+  if (lower === 'zh-tw' || lower === 'zh-hant' || lower === 'zh-hk') return 'zh-TW';
+  if (lower === 'zh' || lower.startsWith('zh-')) return 'zh-CN';
+  return I18N[value] ? value : null;
+}
+
+function minerLanguage() {
+  // Status arrives through SSE, so it is fresher than the settings snapshot
+  // (which is only reloaded when the Settings tab opens).
+  return state.status?.language || state.settings?.language || '';
+}
+
+// The dashboard follows the miner language unless the reader picked one in
+// the top bar. That override is kept in localStorage only while the miner
+// language stays the one it was chosen against - changing the miner language
+// (CLI `lang`, Settings) always wins, so switching it there re-languages the
+// page even if a language was picked here earlier.
+function syncLanguageWithMiner() {
+  const miner = minerLanguage();
+  const next = uiLanguageFor(miner);
+  if (!next) return;
+  if (localStorage.getItem(LANG_KEY)) {
+    const base = localStorage.getItem(LANG_BASE_KEY);
+    if (base && base === miner) return;
+    localStorage.removeItem(LANG_KEY);
+    localStorage.removeItem(LANG_BASE_KEY);
+  }
+  if (localStorage.getItem(LANG_BASE_KEY) !== miner) {
+    localStorage.setItem(LANG_BASE_KEY, miner);
+  }
+  if (next !== state.lang) {
+    state.lang = next;
+    applyLanguage();
+  }
 }
 
 function applyLanguage() {
@@ -1633,6 +1675,9 @@ function bindEvents() {
   $('#lang-select').addEventListener('change', (event) => {
     state.lang = event.target.value;
     localStorage.setItem(LANG_KEY, state.lang);
+    // Remember which miner language this override was chosen against, so a
+    // later `lang` change in the miner wins over the stale override.
+    localStorage.setItem(LANG_BASE_KEY, minerLanguage());
     applyLanguage();
   });
   for (const button of $$('#tabs button')) {
