@@ -333,12 +333,28 @@ class _AuthState:
 
     async def _sleep_or_import(self, delay: float) -> None:
         # A session arriving mid-login should take effect now, not after the
-        # device code expires.
+        # device code expires. A close request has to end the wait too: a
+        # browser sign-in that is still running never expires on its own, so
+        # `quit` would sit behind it until that login ended - which is exactly
+        # the wait the user is trying to abandon.
+        gui = self._twitch.gui
+        if gui.close_requested:
+            raise ExitRequest()
+        imported = asyncio.ensure_future(self._import_pending.wait())
+        closed = asyncio.ensure_future(gui.wait_until_closed())
         try:
-            await asyncio.wait_for(self._import_pending.wait(), timeout=delay)
-        except asyncio.TimeoutError:
-            return
-        raise _ImportReady()
+            done, _ = await asyncio.wait(
+                {imported, closed}, timeout=delay,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for task in (imported, closed):
+                task.cancel()
+            await asyncio.gather(imported, closed, return_exceptions=True)
+        if closed in done:
+            raise ExitRequest()
+        if imported in done:
+            raise _ImportReady()
 
     # How often a wait for a sign-in checks that one is still in progress.
     SIGN_IN_POLL = 5.0
@@ -773,6 +789,9 @@ class Twitch:
         # set once the campaigns API has come back empty, to keep the warning from
         # repeating on every inventory refresh
         self._no_campaigns_warned: bool = False
+        # Last catalog size reported, so the count is logged when it changes
+        # rather than on every inventory refresh.
+        self._catalog_seen: int | None = None
         # NOTE: GQL is pretty volatile and breaks everything if one runs into their rate limit.
         # Do not modify the default, safe values.
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
@@ -2477,6 +2496,17 @@ class Twitch:
             DropsCampaign(self, campaign_data, claimed_benefits)
             for campaign_data in inventory_data.values()
         ]
+        # Twitch returns campaigns that are already over and ones whose game or
+        # details cannot be resolved; only what survives here is worth showing.
+        # Log both numbers when the catalog changes, so "the dashboard says 127
+        # but the log said 153" is answered by the line itself.
+        if len(available_list) != self._catalog_seen:
+            self._catalog_seen = len(available_list)
+            logger.info(
+                f"Campaign catalog: {len(available_list)} returned by Twitch,"
+                f" {len(campaigns)} usable, {len(ongoing_campaigns)} already in progress"
+                f" (session: {'browser' if self._auth_state.imported_active else self._client_type.NAME})"
+            )
         campaigns.sort(key=lambda c: c.active, reverse=True)
         campaigns.sort(key=lambda c: c.upcoming and c.starts_at or c.ends_at)
         campaigns.sort(key=lambda c: c.eligible, reverse=True)

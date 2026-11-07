@@ -271,12 +271,20 @@ class OwnedChromium:
     """Own a temporary profile and process group; never attach to a user's browser."""
 
     def __init__(
-        self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 40,
-        headless: bool = True, extra_args: Sequence[str] = (),
-        env: Mapping[str, str] | None = None, profile_prefix: str = "tdm-renew-",
-        proxy: str = "", user_agent: str = "",
+        self, executable: str, *, no_sandbox: bool | None = None,
+        startup_timeout: float = 40, headless: bool = True,
+        extra_args: Sequence[str] = (), env: Mapping[str, str] | None = None,
+        profile_prefix: str = "tdm-renew-", proxy: str = "", user_agent: str = "",
     ):
         self.executable: str = executable
+        # Chromium refuses its sandbox when running as root, which is the normal
+        # case in a container, and refuses to start at all rather than degrade.
+        # Decided here rather than at each call site: every launcher - renewal,
+        # sign-in and the browser check - has to get this right, and one that
+        # forgets fails with BROWSER_START on exactly the machines that cannot
+        # pop a window to notice it.
+        if no_sandbox is None:
+            no_sandbox = os.name == "posix" and os.geteuid() == 0
         self.no_sandbox: bool = no_sandbox
         self.startup_timeout: float = startup_timeout
         # A headless browser advertises "HeadlessChrome" in its default user

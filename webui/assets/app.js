@@ -163,6 +163,10 @@ const I18N = {
     clear_view: 'Clear view',
     no_channels: 'No channels match this filter.',
     no_campaigns: 'No campaigns match this filter.',
+    add_to_wanted: 'Add to mining list',
+    in_wanted: 'In mining list',
+    wanted_added: '{game} added to the mining list.',
+    wanted_already: '{game} is already in the mining list.',
     loading: 'Loading…',
     paused: 'Mining paused.',
     resumed: 'Mining resumed.',
@@ -323,6 +327,10 @@ const I18N = {
     clear_view: '清空显示',
     no_channels: '没有符合筛选条件的频道。',
     no_campaigns: '没有符合筛选条件的活动。',
+    add_to_wanted: '加入挖取列表',
+    in_wanted: '已在挖取列表',
+    wanted_added: '已将 {game} 加入挖取列表。',
+    wanted_already: '{game} 已在挖取列表中。',
     loading: '加载中…',
     paused: '已暂停挖宝。',
     resumed: '已继续挖宝。',
@@ -481,6 +489,10 @@ I18N['zh-TW'] = {
   clear_view: '清除顯示',
   no_channels: '沒有符合篩選條件的頻道。',
   no_campaigns: '沒有符合篩選條件的活動。',
+  add_to_wanted: '加入挖取列表',
+  in_wanted: '已在挖取列表',
+  wanted_added: '已將 {game} 加入挖取列表。',
+  wanted_already: '{game} 已在挖取列表中。',
   loading: '載入中…',
   paused: '已暫停挖寶。',
   resumed: '已繼續挖寶。',
@@ -1013,9 +1025,15 @@ function renderChannels() {
 
 function campaignCard(campaign) {
   const art = cachedImage(campaign, 'campaign-art');
+  const gameName = campaign.game?.name;
+  // "Mining list" is the priority list; wanted_games is what the engine could
+  // actually mine right now, so either one means the game is already covered.
+  const wanted = new Set(state.status?.wanted_games || []);
+  const priority = new Set(state.status?.priority || []);
+  const inMiningList = Boolean(gameName) && (wanted.has(gameName) || priority.has(gameName));
   const head = el('div', { class: 'campaign-head' },
     art,
-    el('span', { class: 'game', text: campaign.game?.name || '—' }),
+    el('span', { class: 'game', text: gameName || '—' }),
     el('span', { class: 'name', text: campaign.name }),
     el('span', { class: 'badge accent', text: `${campaign.claimed_drops}/${campaign.total_drops}` }),
     campaign.allowed_channels?.length
@@ -1023,6 +1041,15 @@ function campaignCard(campaign) {
       : null,
     !campaign.linked ? el('span', { class: 'badge amber', text: t('unlinked') }) : null,
     campaign.finished ? el('span', { class: 'badge green', text: t('claimed') }) : null,
+    gameName
+      ? el('button', {
+          type: 'button',
+          class: 'small',
+          text: inMiningList ? t('in_wanted') : t('add_to_wanted'),
+          disabled: inMiningList ? true : null,
+          onclick: () => addCampaignToWanted(campaign),
+        })
+      : null,
   );
   const meta = el('div', { class: 'campaign-meta' },
     el('span', { text: t('ends', { when: formatDate(campaign.ends_at) }) }),
@@ -1511,6 +1538,22 @@ async function selectChannel(channel) {
     await apiPost('/api/channels/select', { id: channel.id });
     toast(`${t('watch')}: ${channel.name}`);
     await Promise.all([loadStatus(), loadChannels()]);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function addCampaignToWanted(campaign) {
+  const game = campaign.game?.name;
+  if (!game) return;
+  try {
+    const data = await apiPost('/api/actions/watch-campaign', { campaign_id: campaign.id });
+    toast(
+      data.added || data.unexcluded
+        ? t('wanted_added', { game })
+        : t('wanted_already', { game })
+    );
+    await Promise.all([loadStatus(), loadCampaigns(), loadChannels()]);
   } catch (error) {
     toast(error.message, true);
   }

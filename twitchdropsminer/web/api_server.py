@@ -218,6 +218,7 @@ def _status_data(twitch: Twitch) -> dict[str, Any]:
             "websockets": len(twitch.gui.websockets.entries),
         },
         "wanted_games": [game.name for game in twitch.wanted_games],
+        "priority": list(twitch.settings.priority),
         "login": {"status": login.status, "user_id": login.user_id},
         "websockets": [
             {"idx": entry.idx, "status": entry.status, "topics": entry.topics}
@@ -550,6 +551,37 @@ class APIEndpoint:
             return None
         return endpoint
 
+    @staticmethod
+    def _public_host(request: web.Request) -> str:
+        """
+        The name the browser used, when a front end bothered to record it.
+
+        A Cloudflare tunnel may pass its own host to the origin through the
+        Host header (``httpHostHeader``), leaving only X-Forwarded-Host with
+        the public name. If neither names the public host, the Host header is
+        all there is.
+        """
+        forwarded = request.headers.get("X-Forwarded-Host", "")
+        candidate = forwarded.split(",", 1)[0].strip() or request.host
+        try:
+            return URL(f"http://{candidate}").host or request.url.host
+        except ValueError:
+            return request.url.host
+
+    @staticmethod
+    def _same_origin_hint(request: web.Request, origin: URL) -> bool:
+        """
+        Whether this request really came from the page whose Origin it names.
+
+        Compared against the host a browser cannot forge: the Origin header
+        itself is what a cross-site page would lie in, but ``Sec-Fetch-Site``
+        is set by the browser and is outside script control. A matching public
+        host is the other witness, for browsers that do not send it.
+        """
+        if request.headers.get("Sec-Fetch-Site", "").lower() == "same-origin":
+            return True
+        return origin.host == APIEndpoint._public_host(request)
+
     def _proxy_headers(self, request: web.Request) -> dict[str, str]:
         headers: dict[str, str] = {}
         for key, value in request.headers.items():
@@ -565,6 +597,34 @@ class APIEndpoint:
         # cookie was issued for the dashboard's origin, so keep both as the
         # browser sent them.
         headers["Host"] = request.host
+        # This hop is plain HTTP even when the browser reached the dashboard
+        # over TLS, and the tunnel may also have rewritten Host or left a
+        # wrong X-Forwarded-Proto behind. When the browser itself says the
+        # request is same-origin, its Origin is the truth about the page it
+        # came from, so present that host and scheme to the endpoint and the
+        # check passes. A foreign Origin is forwarded untouched and still
+        # rejected - and the token cookie is HttpOnly and SameSite=Strict, so
+        # a foreign page cannot make an authorized request in the first place.
+        origin = request.headers.get("Origin")
+        if origin is not None:
+            try:
+                parsed = URL(origin)
+            except ValueError:
+                parsed = None
+            if (
+                parsed is not None
+                and parsed.host is not None
+                and parsed.scheme in ("http", "https")
+                and self._same_origin_hint(request, parsed)
+            ):
+                authority = f"[{parsed.host}]" if ":" in parsed.host else parsed.host
+                if parsed.explicit_port:
+                    authority = f"{authority}:{parsed.explicit_port}"
+                headers["Host"] = authority
+                headers["X-Forwarded-Proto"] = parsed.scheme
+                return headers
+        if not any(key.lower() == "x-forwarded-proto" for key in headers):
+            headers["X-Forwarded-Proto"] = request.scheme
         return headers
 
     async def _login_http_proxy(self, request: web.Request) -> web.Response:
@@ -785,6 +845,46 @@ class APIEndpoint:
         if action == "unwatch":
             twitch.stop_watching()
             return web.json_response({"ok": True})
+        if action == "watch-campaign":
+            # Quick-add from the campaign list: put the campaign's game on the
+            # priority list (the panel's "mining list") and take it off the
+            # exclude list, then let the engine rebuild wanted games now rather
+            # than at the next scheduled reload.
+            data, error = await self._json_object(request)
+            if error is not None:
+                return error
+            campaign_id = data.get("campaign_id")
+            campaign = (
+                twitch._campaigns.get(str(campaign_id))
+                if campaign_id is not None
+                else None
+            )
+            if campaign is None:
+                return _error("campaign not found", 404)
+            game = campaign.game
+            if game is None:
+                return _error("this campaign has no game", 409)
+            settings = twitch.settings
+            priority = list(settings.priority)
+            added = game.name not in priority
+            if added:
+                priority.append(game.name)
+            exclude = set(settings.exclude)
+            unexcluded = game.name in exclude
+            exclude.discard(game.name)
+            if added or unexcluded:
+                settings.priority = priority
+                settings.exclude = exclude
+                settings.save()
+                twitch.change_state(State.GAMES_UPDATE)
+            return web.json_response(
+                {
+                    "ok": True,
+                    "game": game.name,
+                    "added": added,
+                    "unexcluded": unexcluded,
+                }
+            )
         if action == "exit":
             # API clients only: stopping the miner also stops this dashboard,
             # so the web UI deliberately has no button for it.

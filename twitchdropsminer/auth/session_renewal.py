@@ -17,7 +17,6 @@ import asyncio
 import base64
 import json
 import logging
-import os
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -579,11 +578,8 @@ class SessionRenewal:
         if executable is None:
             raise SessionImportError("BROWSER_MISSING")
         issuer = SDKIssuer(
-            # Chromium refuses its sandbox when running as root, which is the
-            # normal case in a container.
             OwnedChromium(
                 executable,
-                no_sandbox=os.name == "posix" and os.geteuid() == 0,
                 proxy=self.proxy,
                 user_agent=seed.bundle.user_agent,
             ),

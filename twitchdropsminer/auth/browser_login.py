@@ -83,6 +83,10 @@ FRAME_QUEUE = 2
 # it anyway, and how often to ask.
 PAGE_WAIT = 5.0
 PAGE_POLL = 0.1
+# When to look at the page and say whether it ever finished loading. A browser
+# that cannot reach Twitch shows its loading spinner forever, which looks
+# identical to a broken viewer unless the miner says so.
+PAGE_REPORT = 20.0
 
 
 def has_display() -> bool:
@@ -499,9 +503,6 @@ class BrowserLogin:
         session used to be delivered, so the miner picks it up without a
         restart.
         """
-        # Chromium refuses its sandbox when running as root, which is the normal
-        # case in a container.
-        no_sandbox = os.name == "posix" and os.geteuid() == 0
         self._http = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
             cookie_jar=aiohttp.DummyCookieJar(),
@@ -510,7 +511,7 @@ class BrowserLogin:
         try:
             async with virtual_display() as display:
                 browser = OwnedChromium(
-                    self.executable, no_sandbox=no_sandbox, headless=False,
+                    self.executable, headless=False,
                     env={} if display is None else {"DISPLAY": display},
                     profile_prefix="tdm-login-", proxy=self.proxy,
                 )
@@ -541,6 +542,7 @@ class BrowserLogin:
         self.state = "waiting"
         observer = LoginObserver(protocol, on_frame=self._frame, clock=self.clock)
         watching = asyncio.create_task(observer.run())
+        health: asyncio.Task | None = None
         try:
             await protocol.command("Page.enable")
             await protocol.command("Network.enable")
@@ -560,6 +562,7 @@ class BrowserLogin:
                 "format": "jpeg", "quality": 60,
                 "maxWidth": 1280, "maxHeight": 900, "everyNthFrame": 1,
             })
+            health = asyncio.create_task(self._report_page(protocol))
 
             deadline = self.clock() + self.timeout
             settled_at: float | None = None
@@ -596,7 +599,44 @@ class BrowserLogin:
                 await asyncio.sleep(POLL_INTERVAL)
         finally:
             watching.cancel()
-            await asyncio.gather(watching, return_exceptions=True)
+            tasks = [watching]
+            if health is not None:
+                health.cancel()
+                tasks.append(health)
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _report_page(self, protocol: Any) -> None:
+        """
+        Say once, after the page has had time, whether it actually loaded.
+
+        A white window with a spinner is the sign-in page waiting for assets
+        that never arrive - usually a browser with no route to Twitch. Without
+        this line the log is silent and the viewer looks broken instead.
+        """
+        await asyncio.sleep(PAGE_REPORT)
+        with suppress(SessionImportError, asyncio.TimeoutError):
+            result = await protocol.command("Runtime.evaluate", {
+                "expression": (
+                    "({ready: document.readyState,"
+                    " href: document.location.href,"
+                    " title: document.title})"
+                ),
+                "returnByValue": True,
+            })
+            info = result.get("result", {}).get("value")
+            if not isinstance(info, dict):
+                return
+            logger.info(
+                f"Sign-in page: {info.get('href')} ({info.get('ready')})"
+                f" {info.get('title') or ''}".rstrip()
+            )
+            if info.get("ready") != "complete":
+                logger.warning(
+                    "The sign-in page did not finish loading - the browser most"
+                    " likely cannot reach Twitch. It uses the same proxy as the"
+                    " miner; check `proxy` / HTTPS_PROXY (inside a container,"
+                    " 127.0.0.1 is not the host's proxy)."
+                )
 
     async def _wait_for_page(self, protocol: Any) -> None:
         """

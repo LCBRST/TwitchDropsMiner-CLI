@@ -42,6 +42,10 @@ logger = logging.getLogger("TwitchDrops")
 COOKIE_NAME = "tdm_login"
 # Viewer input is a handful of numbers per event; nothing legitimate is larger.
 MAX_INPUT_BYTES = 64 * 1024
+# How long a frame request is held before answering "nothing new". Staying well
+# under Cloudflare's 100s idle timeout keeps the long-poll alive through a
+# tunnel, and a shorter hold only makes the client ask again sooner.
+FRAME_HOLD = 25.0
 
 
 class _Rejected(Exception):
@@ -159,8 +163,45 @@ decoder.onload = () => {{
   ctx.drawImage(decoder, 0, 0);
 }};
 
+function draw(data) {{
+  decoder.src = "data:image/jpeg;base64," + data;
+  screenEl.classList.add("started");
+}}
+
 function send(message) {{
-  if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
+  if (socket && socket.readyState === 1) {{
+    socket.send(JSON.stringify(message));
+    return;
+  }}
+  // No socket: the long-poll fallback carries input over POST as well.
+  fetch("/login/input", {{
+    method: "POST", headers: {{"Content-Type": "application/json"}},
+    body: JSON.stringify(message),
+  }}).catch(() => {{}});
+}}
+
+// Some networks - notably a Cloudflare tunnel that hands the handshake to the
+// origin over the wrong HTTP version - carry every plain request but never the
+// upgrade. When the socket closes, switch to holding a frame request open
+// instead of cycling a connection that is not going to work.
+let fallback = false;
+async function pollFrames() {{
+  fallback = true;
+  while (!done) {{
+    try {{
+      const response = await fetch("/login/frames", {{cache: "no-store"}});
+      if (response.status === 200) {{
+        const message = await response.json();
+        if (message.data) draw(message.data);
+      }} else if (response.status !== 204) {{
+        statusEl.textContent = S.page_disconnected;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }}
+    }} catch (error) {{
+      statusEl.textContent = S.page_disconnected;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }}
+  }}
 }}
 
 function connect() {{
@@ -168,15 +209,11 @@ function connect() {{
   socket = new WebSocket(scheme + location.host + "/login/ws");
   socket.onmessage = (event) => {{
     const message = JSON.parse(event.data);
-    if (message.data) {{
-      decoder.src = "data:image/jpeg;base64," + message.data;
-      screenEl.classList.add("started");
-    }}
+    if (message.data) draw(message.data);
   }};
   socket.onclose = () => {{
-    if (done) return;
-    statusEl.textContent = S.page_disconnected;
-    setTimeout(connect, 1000);
+    if (done || fallback) return;
+    pollFrames();
   }};
 }}
 
@@ -202,7 +239,9 @@ function mouse(type, event, clickCount) {{
 
 canvas.addEventListener("mousemove", (event) => {{
   const now = Date.now();
-  if (now - lastMove < 40) return;
+  // A hanging POST per move is a lot more traffic than a websocket frame, so
+  // the fallback sends the cursor less often.
+  if (now - lastMove < (fallback ? 120 : 40)) return;
   lastMove = now;
   mouse("mouseMoved", event);
 }});
@@ -301,6 +340,9 @@ class LoginEndpoint:
         self._task: asyncio.Task | None = None
         self._runner: web.AppRunner | None = None
         self._sockets: set[web.WebSocketResponse] = set()
+        # Frame requests parked by the long-poll fallback. They wait up to
+        # FRAME_HOLD for a frame, which would otherwise hold shutdown up.
+        self._waiters: set[asyncio.Future[Any]] = set()
 
     # -- addresses ---------------------------------------------------------
 
@@ -357,6 +399,10 @@ class LoginEndpoint:
             web.get("/login", self._page),
             web.get("/login/ws", self._socket),
             web.get("/login/state", self._state),
+            # The same stream and input as the socket, over plain requests, for
+            # a network where the upgrade does not survive the trip.
+            web.get("/login/frames", self._frames),
+            web.post("/login/input", self._input),
             web.post("/login/ready", self._ready),
             web.post("/login/cancel", self._cancel),
             # Last: a dynamic segment matches anything, so every fixed path
@@ -385,6 +431,11 @@ class LoginEndpoint:
             with suppress(Exception):
                 await socket_.close()
         self._sockets.clear()
+        # Same reason as the sockets: a parked frame request would otherwise
+        # keep cleanup waiting for up to FRAME_HOLD.
+        for waiter in list(self._waiters):
+            waiter.cancel()
+        self._waiters.clear()
         if runner is not None:
             with suppress(Exception):
                 await runner.cleanup()
@@ -451,7 +502,23 @@ class LoginEndpoint:
     # -- guarding ----------------------------------------------------------
 
     @staticmethod
-    def _same_origin(request: web.Request, origin: str) -> bool:
+    def _browser_scheme(request: web.Request) -> str:
+        """
+        The scheme the page was served with, not the one this hop arrived on.
+
+        The dashboard forwards sign-in traffic to this socket over plain HTTP
+        even when the page itself is served over TLS - a Cloudflare tunnel or
+        any reverse proxy - and a browser's Origin carries the scheme it sees,
+        not the proxy's. Browsers cannot set forwarding headers, so trusting
+        one cannot get a cross-site page past the check; a client that is not
+        a browser can simply leave Origin off anyway.
+        """
+        forwarded = request.headers.get("X-Forwarded-Proto", "")
+        scheme = forwarded.split(",", 1)[0].strip().lower()
+        return scheme if scheme in ("http", "https") else request.url.scheme
+
+    @classmethod
+    def _same_origin(cls, request: web.Request, origin: str) -> bool:
         try:
             parsed = URL(origin)
         except ValueError:
@@ -459,11 +526,14 @@ class LoginEndpoint:
         if parsed.host is None:
             return False
         # A cookie is not scoped to a port, so the port has to be compared here
-        # rather than assumed from the host.
-        return (
-            parsed.host == request.url.host
-            and _port(parsed) == _port(request.url)
-        )
+        # rather than assumed from the host. The Host header carries the public
+        # name and, when the front end is not on 80/443, its port; only fall
+        # back to the scheme's default when it does not.
+        scheme = cls._browser_scheme(request)
+        # `URL.port` fills in the scheme's default, so ask for the port that
+        # was actually written down before falling back to that default.
+        expected = request.url.explicit_port or (443 if scheme == "https" else 80)
+        return parsed.host == request.url.host and _port(parsed) == expected
 
     def _authorize(self, request: web.Request) -> None:
         """
@@ -535,6 +605,55 @@ class LoginEndpoint:
         except _Rejected as rejected:
             return self._reject(rejected)
         return web.json_response(self.status())
+
+    async def _frames(self, request: web.Request) -> web.Response:
+        """
+        One frame, for a viewer whose WebSocket did not get through.
+
+        The request is held until there is news rather than polled blindly: a
+        still page costs one parked request and answers 204 only every
+        FRAME_HOLD seconds. A tunnel that refuses the upgrade still carries
+        this, which is the point.
+        """
+        try:
+            self._authorize(request)
+        except _Rejected as rejected:
+            return self._reject(rejected)
+        login = self.login
+        if login is None:
+            return self._reject(_Rejected(403, "idle"))
+        frames = login.subscribe()
+        getter: asyncio.Future[Any] = asyncio.ensure_future(frames.get())
+        self._waiters.add(getter)
+        try:
+            frame = await asyncio.wait_for(getter, timeout=FRAME_HOLD)
+        except asyncio.TimeoutError:
+            return web.Response(status=204)
+        finally:
+            self._waiters.discard(getter)
+            if not getter.done():
+                getter.cancel()
+                with suppress(asyncio.CancelledError):
+                    await getter
+            login.unsubscribe(frames)
+        return web.json_response(frame)
+
+    async def _input(self, request: web.Request) -> web.Response:
+        """The fallback's input path; the websocket path is unchanged."""
+        try:
+            self._authorize(request)
+        except _Rejected as rejected:
+            return self._reject(rejected)
+        login = self.login
+        if login is None:
+            return self._reject(_Rejected(403, "idle"))
+        try:
+            data = json.loads(await request.read())
+        except (ValueError, UnicodeError, RecursionError):
+            return web.json_response({"ok": False}, status=400)
+        if isinstance(data, dict):
+            await login.input(data)
+        return web.json_response({"ok": True})
 
     async def _ready(self, request: web.Request) -> web.Response:
         """The user says the sign-in is done; stop waiting for more evidence."""
