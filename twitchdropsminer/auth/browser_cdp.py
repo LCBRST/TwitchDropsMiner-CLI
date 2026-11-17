@@ -20,6 +20,7 @@ import shutil
 import signal
 import sys
 import tempfile
+import time
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
@@ -40,6 +41,63 @@ MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 # The endpoints this module reasons about; see DevToolsConnection.
 GQL_URL = "https://gql.twitch.tv/gql"
 INTEGRITY_URL = "https://gql.twitch.tv/integrity"
+
+# How long the browser is given to close itself over the protocol, then to exit
+# after SIGTERM, then after SIGKILL. Closing over the protocol first is what
+# lets Chrome shut its children down and reap them: a browser killed by a
+# signal does not, and its children end up parentless.
+CLOSE_TIMEOUT = 3.0
+CLOSE_REQUEST_TIMEOUT = 1.5
+TERM_TIMEOUT = 1.5
+KILL_TIMEOUT = 1.5
+
+# The names every temporary profile here gets: the prefix `TemporaryDirectory`
+# was given plus the eight characters it appends. They are how a browser and its
+# profile, left behind by an earlier run, are told apart from anything else.
+PROFILE_PREFIXES = ("tdm-renew-", "tdm-login-")
+_PROFILE_NAME = re.compile(r"tdm-(?:renew|login)-[A-Za-z0-9_]{6,16}")
+
+# A profile is only removed without a browser around once it is older than any
+# session could legitimately last; a sign-in gets TOTAL_TIMEOUT (30 minutes) to
+# be completed, and renewal a couple of minutes. Anything younger may belong to
+# a browser still starting or in progress elsewhere.
+PROFILE_MAX_AGE = 2 * 3600.0
+
+# Linux: ask the kernel to SIGKILL a child when this process dies. Nothing else
+# can stop a browser when the miner itself is SIGKILLed - no cleanup runs - and
+# the result is a window, or a whole headless browser, that outlives the miner
+# that owned it. Resolved once, at import, so the forked child only has to call
+# one already-loaded symbol.
+_PR_SET_PDEATHSIG = 1
+_PARENT_PID = os.getpid()
+try:
+    import ctypes
+
+    _prctl = ctypes.CDLL(None, use_errno=True).prctl
+except (ImportError, OSError, AttributeError):  # not Linux, or no libc
+    _prctl = None
+
+
+def _die_with_parent() -> None:
+    """
+    Child side of a spawn on Linux: die when the miner does.
+
+    Runs between fork and exec, so it stays tiny and lock-free - dlopen and
+    imports are exactly what must not happen there, which is why `_prctl` was
+    resolved before any thread existed. `subprocess` documents preexec_fn as
+    unsafe in a threaded process; the call below is a single libc syscall
+    wrapper, and the alternative is a browser that survives a hard kill.
+    """
+    if _prctl is not None:
+        _prctl(_PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+        # The miner may have died between fork and the call above, in which
+        # case no signal will ever come: get out instead of lingering.
+        if os.getppid() != _PARENT_PID:
+            os._exit(127)
+
+
+# None on platforms where it does not apply; subprocess rejects only non-None.
+PREEXEC = _die_with_parent if os.name == "posix" and _prctl is not None else None
 
 
 def find_browser(explicit: str = "") -> str | None:
@@ -79,6 +137,235 @@ def find_browser(explicit: str = "") -> str | None:
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+def _process_fields(pid: int) -> list[str] | None:
+    """
+    The fields of /proc/<pid>/stat after the command name, or None.
+
+    The command name can contain spaces and parentheses, so everything up to
+    the last ')' is skipped rather than split on whitespace: the remaining
+    fields start with state, ppid, pgrp and session, which is all this module
+    needs.
+    """
+    try:
+        stat = Path("/proc", str(pid), "stat").read_text()
+        return stat.rsplit(")", 1)[1].split()
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _group_members(pgid: int) -> list[int]:
+    """Live (not zombie) processes still in a process group."""
+    members: list[int] = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return members
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        fields = _process_fields(int(entry))
+        # state, ppid, pgrp, session
+        if fields is None or len(fields) < 3:
+            continue
+        if fields[2] != str(pgid) or fields[0] == "Z":
+            continue
+        members.append(int(entry))
+    return members
+
+
+# Children whose exit asyncio is waiting for. The reaper below must never
+# consume one of those itself: the status belongs to `process.wait()`.
+_SPAWNED: set[int] = set()
+
+
+def track_child(pid: int) -> None:
+    _SPAWNED.add(pid)
+
+
+def untrack_child(pid: int) -> None:
+    _SPAWNED.discard(pid)
+
+
+def reap_orphans() -> list[int]:
+    """
+    Reap zombie children nobody else is waiting for.
+
+    When the miner is PID 1 (a container running it directly), every process
+    orphaned by a browser or by a crashed worker is reparented to it, and
+    Python reaps only the children it spawned - so without this they stay in
+    `top` as zombies for the life of the container. Elsewhere this finds only
+    children of the current process, and a running browser is not a zombie.
+    """
+    reaped: list[int] = []
+    if os.name != "posix" or not os.path.isdir("/proc"):
+        return reaped
+    me = str(os.getpid())
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid in _SPAWNED:
+            continue  # asyncio owns this one's exit status
+        fields = _process_fields(pid)
+        if fields is None or len(fields) < 2:
+            continue
+        if fields[0] != "Z" or fields[1] != me:
+            continue
+        try:
+            os.waitpid(pid, os.WNOHANG)
+            reaped.append(pid)
+        except (ChildProcessError, OSError):
+            continue
+    if reaped:
+        logger.debug(
+            "Reaped zombie child processes: "
+            + ", ".join(str(pid) for pid in reaped)
+        )
+    return reaped
+
+
+def _is_owned_profile(name: str) -> bool:
+    """Whether a directory name is one of this app's temporary profiles."""
+    return _PROFILE_NAME.fullmatch(name) is not None
+
+
+def _profile_directories() -> list[Path]:
+    """Every temporary browser profile in the temp directory."""
+    base = Path(tempfile.gettempdir())
+    try:
+        entries = list(base.iterdir())
+    except OSError:
+        return []
+    return [
+        path for path in entries
+        # A link is not a profile, and following one would delete somewhere
+        # else entirely.
+        if not path.is_symlink() and path.is_dir() and _is_owned_profile(path.name)
+    ]
+
+
+def _profiles_in_use() -> set[str]:
+    """Profile paths named by a live process's command line."""
+    used: set[str] = set()
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return used
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            arguments = Path("/proc", entry, "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        for argument in arguments:
+            text = argument.decode("utf8", "replace")
+            if text.startswith("--user-data-dir="):
+                used.add(os.path.realpath(text.split("=", 1)[1]))
+                break
+    return used
+
+
+def _remove_profile(directory: str | Path, *, older_than: float | None = None) -> bool:
+    """Delete one temporary profile, if it really is one of ours."""
+    path = Path(directory)
+    if path.is_symlink() or not path.is_dir() or not _is_owned_profile(path.name):
+        return False
+    try:
+        if older_than is not None and time.time() - path.stat().st_mtime < older_than:
+            return False
+        shutil.rmtree(path)
+        return True
+    except OSError:
+        # A file that appeared while the directory was being walked, or one
+        # this user may not remove. Either way it is not worth a failure.
+        return False
+
+
+def clean_stale_profiles(max_age: float = PROFILE_MAX_AGE) -> list[str]:
+    """
+    Remove temporary browser profiles that no browser is using.
+
+    `TemporaryDirectory` removes a profile when its browser is stopped the
+    ordinary way, but a hard-killed miner never runs that cleanup - and each
+    profile is a few hundred megabytes. A startup sweep is the only thing that
+    reclaims the disk those sessions leave behind.
+    """
+    used = _profiles_in_use()
+    removed: list[str] = []
+    for path in _profile_directories():
+        if os.path.realpath(path) in used:
+            continue
+        if _remove_profile(path, older_than=max_age):
+            removed.append(str(path))
+    if removed:
+        logger.info(
+            "Removed temporary browser profiles left behind by an earlier run: "
+            + ", ".join(removed)
+        )
+    return removed
+
+
+def kill_orphaned_browsers() -> list[int]:
+    """
+    Kill browsers that an earlier run left behind.
+
+    A browser is only ours to kill when its whole process group carries one of
+    this app's temporary profiles as its user-data directory and its parent is
+    gone (PID 1). That is a browser no miner owns any more; a browser a running
+    instance is using right now still has that miner as its parent and is left
+    alone.
+
+    Without this, a miner restarted after a hard kill keeps the previous run's
+    browser alive - possibly sitting on Twitch, burning CPU, until someone
+    notices it in `top`.
+    """
+    killed: list[int] = []
+    if not sys.platform.startswith("linux"):
+        return killed
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return killed
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == os.getpid():
+            continue
+        fields = _process_fields(pid)
+        # state, ppid, pgrp: an orphaned session/pgroup leader, and not a
+        # zombie somebody else has yet to reap.
+        if fields is None or len(fields) < 3:
+            continue
+        if fields[0] == "Z" or fields[1] != "1" or fields[2] != str(pid):
+            continue
+        try:
+            cmdline = Path("/proc", entry, "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        profile = ""
+        for argument in cmdline:
+            text = argument.decode("utf8", "replace")
+            if text.startswith("--user-data-dir="):
+                profile = text.split("=", 1)[1].rstrip("/")
+                break
+        if not _is_owned_profile(os.path.basename(profile)):
+            continue
+        with suppress(ProcessLookupError, OSError):
+            os.killpg(pid, signal.SIGKILL)
+            killed.append(pid)
+        # The profile is a few hundred megabytes. The process that would have
+        # removed it is the one just killed, so do it here.
+        _remove_profile(profile)
+    if killed:
+        logger.info(
+            "Closed browser processes left behind by an earlier run: "
+            + ", ".join(str(pid) for pid in killed)
+        )
+    return killed
 
 
 class DevToolsConnection:
@@ -305,7 +592,9 @@ class OwnedChromium:
         self.env: Mapping[str, str] | None = env
         self.profile_prefix: str = profile_prefix
 
-    async def _poll_ready(self, process: asyncio.subprocess.Process, profile: Path) -> str:
+    async def _poll_ready(
+        self, process: asyncio.subprocess.Process, profile: Path,
+    ) -> tuple[str, URL]:
         while process.returncode is None:
             try:
                 lines = (profile / "DevToolsActivePort").read_text().splitlines()
@@ -319,10 +608,20 @@ class OwnedChromium:
                 or not re.fullmatch(r"/devtools/browser/[a-zA-Z0-9-]+", lines[1])
             ):
                 raise SessionImportError("BROWSER_START")
-            return f"http://127.0.0.1:{int(lines[0])}"
+            port = int(lines[0])
+            address = f"http://127.0.0.1:{port}"
+            # The browser-level socket, kept so the browser can be asked to
+            # close itself rather than be killed. Validated like every other
+            # endpoint before anything dials it.
+            endpoint = local_endpoint(
+                address, f"ws://127.0.0.1:{port}{lines[1]}"
+            )
+            return address, endpoint
         raise SessionImportError("BROWSER_START")
 
-    async def wait_ready(self, process: asyncio.subprocess.Process, profile: Path) -> str:
+    async def wait_ready(
+        self, process: asyncio.subprocess.Process, profile: Path,
+    ) -> tuple[str, URL]:
         # asyncio.timeout is 3.11+, and this fork still supports 3.10.
         try:
             return await asyncio.wait_for(
@@ -357,24 +656,125 @@ class OwnedChromium:
                 process.kill()
 
     @classmethod
-    async def stop(cls, process: asyncio.subprocess.Process) -> None:
-        cls._terminate(process)
+    async def _request_close(cls, endpoint: URL) -> bool:
+        """
+        Ask Chrome to close itself over the debugging socket.
+
+        This is the difference between a browser that shuts its children down
+        and reaps them, and one that is shot in the head: a signal-killed
+        browser leaves its renderers, GPU and utility processes parentless, and
+        where nothing reaps them they stay in `top` as zombies. Returns whether
+        the request could be delivered - failure is not an error, the signal
+        path below always follows, it just has nothing to wait for.
+        """
         try:
-            await asyncio.wait_for(process.wait(), 5)
-        except TimeoutError:
-            pass
-        finally:
-            # The leader can exit before descendants that ignore SIGTERM.
-            cls._kill(process)
-        if process.returncode is None:
-            try:
-                await asyncio.wait_for(process.wait(), 2)
-            except TimeoutError:
-                raise SessionImportError("BROWSER_STOP") from None
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=CLOSE_REQUEST_TIMEOUT)
+            ) as http:
+                async with http.ws_connect(
+                    endpoint, timeout=aiohttp.ClientWSTimeout(ws_close=1),
+                ) as socket_:
+                    await socket_.send_json(
+                        {"id": 1, "method": "Browser.close", "params": {}}
+                    )
+            return True
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError):
+            return False
 
     @classmethod
-    async def finish_stop(cls, process: asyncio.subprocess.Process) -> None:
-        cleanup = asyncio.create_task(cls.stop(process))
+    async def _wait_group_gone(cls, pgid: int, timeout: float) -> bool:
+        """Whether every live member of a process group has exited."""
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            if sys.platform.startswith("linux"):
+                if not _group_members(pgid):
+                    return True
+            else:
+                # No /proc: the group is gone once the kernel says it does not
+                # exist. Zombies count as existing, but only until they are
+                # reaped, which is prompt where this branch is used.
+                try:
+                    os.killpg(pgid, 0)
+                except ProcessLookupError:
+                    return True
+            now = asyncio.get_running_loop().time()
+            if now >= deadline:
+                return False
+            await asyncio.sleep(min(.1, deadline - now))
+
+    @classmethod
+    async def _finish_group(cls, pgid: int) -> None:
+        """
+        Make sure nothing the browser started outlives it.
+
+        The leader is already gone when this runs. Children are in the same
+        process group - the browser was started as a session leader - so after
+        a protocol close they are normally gone too, and the signal path here
+        costs one check. If a child survived (a tab that refused to close, a
+        helper that ignores SIGTERM) it is stopped now, rather than being left
+        behind as a parentless process.
+        """
+        if os.name != "posix":
+            return  # Chrome's children die with it through a Windows job object
+        if await cls._wait_group_gone(pgid, 0):
+            return
+        for number, timeout in ((signal.SIGTERM, 1.0), (signal.SIGKILL, KILL_TIMEOUT)):
+            with suppress(ProcessLookupError, OSError):
+                os.killpg(pgid, number)
+            if await cls._wait_group_gone(pgid, timeout):
+                return
+        raise SessionImportError("BROWSER_STOP")
+
+    @classmethod
+    async def stop(
+        cls, process: asyncio.subprocess.Process, endpoint: URL | None = None,
+    ) -> None:
+        """
+        Close the browser, escalate only as far as needed, then check its group.
+
+        The order matters. A protocol close lets Chrome shut down and reap its
+        own children; SIGTERM and SIGKILL are fallbacks for a browser too wedged
+        to answer. Killing first - which is what this used to do - is what made
+        every stop scatter parentless Chrome processes behind it.
+        """
+        if endpoint is not None and process.returncode is None:
+            requested = await cls._request_close(endpoint)
+            # Even an undeliverable request means the browser may already be on
+            # its way out - its page target was closed a moment ago - and
+            # signalling it now would abort its own cleanup.
+            if process.returncode is None:
+                try:
+                    await asyncio.wait_for(
+                        process.wait(), CLOSE_TIMEOUT if requested else 1.0
+                    )
+                except (TimeoutError, asyncio.TimeoutError):
+                    pass
+        if process.returncode is None:
+            cls._terminate(process)
+            try:
+                await asyncio.wait_for(process.wait(), TERM_TIMEOUT)
+            except (TimeoutError, asyncio.TimeoutError):
+                pass
+        if process.returncode is None:
+            cls._kill(process)
+            try:
+                await asyncio.wait_for(process.wait(), KILL_TIMEOUT)
+            except (TimeoutError, asyncio.TimeoutError):
+                pass
+        if process.returncode is None:
+            raise SessionImportError("BROWSER_STOP")
+        try:
+            await cls._finish_group(process.pid)
+        finally:
+            # Any child the browser shed on its way out has just died with it;
+            # collect those now rather than leaving entries in `top` forever.
+            reap_orphans()
+
+    @classmethod
+    async def finish_stop(
+        cls, process: asyncio.subprocess.Process, endpoint: URL | None = None,
+    ) -> None:
+        cleanup = asyncio.create_task(cls.stop(process, endpoint))
         interrupted = False
         while not cleanup.done():
             try:
@@ -406,6 +806,7 @@ class OwnedChromium:
     @asynccontextmanager
     async def start(self) -> AsyncIterator[str]:
         process = None
+        endpoint: URL | None = None
         # Chrome's own diagnostics are the only clue when it refuses to open
         # the debugging port (a policy, a wrapper script, a missing DLL). Keep
         # a bounded tail and only surface it when starting fails.
@@ -465,13 +866,14 @@ class OwnedChromium:
                     )
                 process = await asyncio.create_subprocess_exec(
                     *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
-                    start_new_session=os.name == "posix",
+                    start_new_session=os.name == "posix", preexec_fn=PREEXEC,
                     **({} if self.env is None else {"env": {**os.environ, **self.env}}),
                 )
+                track_child(process.pid)
                 if process.stderr is not None:
                     drain_task = asyncio.create_task(drain(process.stderr))
                 try:
-                    address = await self.wait_ready(process, profile)
+                    address, endpoint = await self.wait_ready(process, profile)
                 except SessionImportError as error:
                     self._log_start_failure(error, profile, tail)
                     raise
@@ -490,4 +892,7 @@ class OwnedChromium:
                     with suppress(asyncio.CancelledError, Exception):
                         await drain_task
                 if process is not None:
-                    await self.finish_stop(process)
+                    try:
+                        await self.finish_stop(process, endpoint)
+                    finally:
+                        untrack_child(process.pid)

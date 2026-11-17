@@ -20,6 +20,27 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 
+def _reap_orphans_now() -> None:
+    """
+    Collect reparented children, without touching the worker.
+
+    Called only when no worker of ours is running: at that moment every child
+    this process has is an orphan from the previous one (a browser's renderers
+    survive the worker for an instant, or longer if it was killed outright),
+    so a waitpid(-1) cannot steal the status of a process somebody is waiting
+    for.
+    """
+    if os.name != "posix":
+        return
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            return
+        if pid == 0:
+            return
+
+
 def _watchdog_supervise() -> int:
     """Supervise a worker process, restarting it after a crash.
 
@@ -46,6 +67,9 @@ def _watchdog_supervise() -> int:
 
     delay = 5.0
     while True:
+        # Anything the previous worker's browser left behind has had the pause
+        # between restarts to die; collect it before the next worker starts.
+        _reap_orphans_now()
         start = time.monotonic()
         proc = subprocess.Popen(relaunch, env=env)
 
@@ -62,6 +86,7 @@ def _watchdog_supervise() -> int:
         finally:
             signal.signal(signal.SIGINT, prev_int)
             signal.signal(signal.SIGTERM, prev_term)
+        _reap_orphans_now()
 
         if code in no_restart:
             return code
@@ -213,6 +238,37 @@ if __name__ == "__main__":
         log.addHandler(file_handler)
         logging.getLogger("TwitchDrops.gql").setLevel(settings.debug_gql)
         logging.getLogger("TwitchDrops.websocket").setLevel(settings.debug_ws)
+
+        # A previous run that was killed outright could not clean up the browser
+        # it owned, and nothing else may still be waiting to. Doing this here,
+        # under the instance lock, means a crashed run never leaves browsers
+        # accumulating across restarts.
+        reaper = None
+        try:
+            from twitchdropsminer.auth.browser_cdp import (
+                clean_stale_profiles,
+                kill_orphaned_browsers,
+                reap_orphans,
+            )
+
+            kill_orphaned_browsers()
+            clean_stale_profiles()
+            reap_orphans()
+            reaper = reap_orphans
+        except Exception:
+            log.debug("Could not check for browsers left behind by an earlier run")
+
+        if reaper is not None and os.getpid() == 1:
+            # This process is the container's init: every process a browser or
+            # a crashed worker orphans is reparented here, and nothing else
+            # reaps them. A slow sweep keeps `top` free of zombies without
+            # racing the child watcher, which is told which pids it owns.
+            async def _reap_loop(collect=reaper) -> None:
+                while True:
+                    await asyncio.sleep(60)
+                    collect()
+
+            asyncio.create_task(_reap_loop(), name="reap-orphans")
 
         if args.token:
             try:

@@ -34,8 +34,11 @@ from yarl import URL
 from twitchdropsminer.auth.browser_cdp import (
     GQL_URL,
     INTEGRITY_URL,
+    PREEXEC,
     OwnedChromium,
     browser_target,
+    track_child,
+    untrack_child,
 )
 from twitchdropsminer.common.constants import IMPORTED_SESSION_PATH
 from twitchdropsminer.auth.session_import import (
@@ -144,11 +147,15 @@ async def _xvfb(executable: str) -> AsyncIterator[str]:
             if Path(f"/tmp/.X11-unix/X{number}").exists():
                 continue
             # A fixed screen size keeps the captured frames predictable.
+            # PREEXEC is the same parent-death signal the browser gets: a
+            # display that outlives a hard-killed miner would otherwise squat on
+            # the number a later sign-in wants.
             process = await asyncio.create_subprocess_exec(
                 executable, f":{number}", "-screen", "0", "1280x900x24", "-nolisten", "tcp",
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=os.name == "posix",
+                start_new_session=os.name == "posix", preexec_fn=PREEXEC,
             )
+            track_child(process.pid)
             if await _wait_for_socket(number, process):
                 yield f":{number}"
                 return
@@ -156,11 +163,13 @@ async def _xvfb(executable: str) -> AsyncIterator[str]:
             # start - a display this app does not own. Move on rather than
             # fighting over it.
             await _stop_process(process)
+            untrack_child(process.pid)
             process = None
         raise SessionImportError("BROWSER_DISPLAY")
     finally:
         if process is not None:
             await _stop_process(process)
+            untrack_child(process.pid)
 
 
 async def _wait_for_socket(number: int, process: asyncio.subprocess.Process) -> bool:
